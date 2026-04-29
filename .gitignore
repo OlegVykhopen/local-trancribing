@@ -1,3 +1,6 @@
 .env
 venv/
 __pycache__/
+transcripts/
+audio_sources/
+.DS_Store
