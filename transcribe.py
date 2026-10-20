@@ -7,6 +7,11 @@ import sys
 import glob
 import time
 
+# Re-exec with the project venv's Python if not already running inside it
+_venv_python = os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "bin", "python3")
+if os.path.exists(_venv_python) and os.path.realpath(sys.executable) != os.path.realpath(_venv_python):
+    os.execv(_venv_python, [_venv_python] + sys.argv)
+
 # Ensure ffmpeg 7 libs are found by torchcodec
 _ffmpeg7_lib = "/opt/homebrew/opt/ffmpeg@7/lib"
 if os.path.isdir(_ffmpeg7_lib):
