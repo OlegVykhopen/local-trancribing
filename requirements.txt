@@ -4,3 +4,5 @@ sse-starlette
 yt-dlp
 pytest
 httpx
+opentelemetry-sdk>=1.44.0
+opentelemetry-exporter-otlp>=1.44.0

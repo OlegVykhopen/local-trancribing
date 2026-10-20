@@ -6,39 +6,12 @@ fixtures in tests without ever touching the real audio_sources/ or transcripts/
 directories, which hold personal data.
 """
 
-import ast
 import re
 from pathlib import Path
 
-_TRANSCRIBE_PY = Path(__file__).resolve().parents[2] / "transcribe.py"
+from transcribe import SUPPORTED_EXTENSIONS
 
 _CATEGORY_NAME_RE = re.compile(r"^[\w\- ]{1,64}$", re.UNICODE)
-
-
-def _load_supported_extensions() -> frozenset[str]:
-    """Read SUPPORTED_EXTENSIONS out of transcribe.py's source without importing it.
-
-    A real `import transcribe` transitively imports whisperx -> pyannote.audio ->
-    pyannote's telemetry module, which currently fails to import in this venv due
-    to a pre-existing, unrelated opentelemetry-api/opentelemetry-sdk version skew
-    (api 1.45.1 installed for fastapi vs sdk/exporters pinned to 1.41.0 by
-    pyannote's own otel dependency -- the two requirements are mutually
-    exclusive). Pulling in the whole ML stack just to read a constant set of file
-    extensions is also unnecessary weight for a lightweight file-listing service.
-    Parsing transcribe.py's AST reads the real source of truth with no risk of
-    drift, and keeps this module free of heavy/broken dependencies.
-    """
-    tree = ast.parse(_TRANSCRIBE_PY.read_text(encoding="utf-8"), filename=str(_TRANSCRIBE_PY))
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == "SUPPORTED_EXTENSIONS"
-            for target in node.targets
-        ):
-            return frozenset(ast.literal_eval(node.value))
-    raise RuntimeError(f"SUPPORTED_EXTENSIONS not found in {_TRANSCRIBE_PY}")
-
-
-SUPPORTED_EXTENSIONS = _load_supported_extensions()
 
 
 def _is_transcribed(audio_file: Path, audio_root: Path, transcripts_root: Path) -> bool:
