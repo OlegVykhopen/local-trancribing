@@ -45,8 +45,12 @@ class JobContext:
 
     def progress(self, percent: float, stage: str, detail: str = "") -> None:
         now = time.monotonic()
+        # percent >= 100 always forces a write: without this, a final call that
+        # lands within the throttle window (<1s, <2% delta) would be dropped and
+        # the job would persist a stale progress value forever after finishing.
         stale = (
-            self._last_write_time is None
+            percent >= 100
+            or self._last_write_time is None
             or now - self._last_write_time >= 1.0
             or self._last_write_percent is None
             or abs(percent - self._last_write_percent) >= 2
@@ -84,6 +88,10 @@ class Worker:
         self._events_lock = threading.Lock()
         self._cancel_events: dict[int, threading.Event] = {}
         self._thread: threading.Thread | None = None
+        # Guards every read-then-write status transition (pickup, terminal
+        # write, cancel) so cancel() and the run loop can never race on the
+        # same job's status column — see _try_pickup / _write_terminal / cancel.
+        self._status_lock = threading.Lock()
 
     def register(self, kind: str, handler: Callable[[dict, JobContext], dict]) -> None:
         self._handlers[kind] = handler
@@ -114,12 +122,27 @@ class Worker:
 
         conn = db.connect(self.db_path)
         try:
-            job = db.get_job(conn, job_id)
-            if job is None:
-                return None
+            # The read-and-decide-and-write below shares _status_lock with
+            # _try_pickup and _write_terminal, so it can never observe a
+            # status value that the run loop is concurrently about to
+            # overwrite (and vice versa) — see those methods for the two
+            # races this closes.
+            with self._status_lock:
+                job = db.get_job(conn, job_id)
+                if job is None:
+                    return None
 
-            if job["status"] == "queued":
-                db.set_status(conn, job_id, "cancelled")
+                if job["status"] == "queued":
+                    db.set_status(conn, job_id, "cancelled")
+                    outcome = "cancelled"
+                elif job["status"] == "running":
+                    db.set_status(conn, job_id, "cancelling")
+                    event.set()
+                    outcome = "cancelling"
+                else:
+                    return None
+
+            if outcome == "cancelled":
                 with self._pending_lock:
                     if job_id in self._pending_ids:
                         self._pending_ids.remove(job_id)
@@ -127,15 +150,10 @@ class Worker:
                     self._cancel_events.pop(job_id, None)
                 self.bus.publish({"type": "job_status", "job_id": job_id, "status": "cancelled"})
                 self._publish_queue()
-                return "cancelled"
-
-            if job["status"] == "running":
-                db.set_status(conn, job_id, "cancelling")
-                event.set()
+            else:
                 self.bus.publish({"type": "job_status", "job_id": job_id, "status": "cancelling"})
-                return "cancelling"
 
-            return None
+            return outcome
         finally:
             conn.close()
 
@@ -145,6 +163,35 @@ class Worker:
 
     def _publish_queue(self) -> None:
         self.bus.publish({"type": "queue", "queue": self.queue_snapshot()})
+
+    def _try_pickup(self, conn, job_id: int) -> dict | None:
+        """Atomically claim a queued job by flipping it to 'running'.
+
+        Shares _status_lock with cancel(): if cancel() is mid-transition on
+        this job id, this call blocks until it finishes and then re-reads
+        the up-to-date status, so a job cancel() just marked 'cancelled'
+        can never be picked up and run, and a job this just claimed as
+        'running' can never be reported as 'cancelled' by a concurrent
+        cancel() call.
+        """
+        with self._status_lock:
+            job = db.get_job(conn, job_id)
+            if job is not None and job["status"] == "queued":
+                db.set_status(conn, job_id, "running")
+                return job
+            return None
+
+    def _write_terminal(self, conn, job_id: int, status: str, error: str | None = None, result: dict | None = None) -> None:
+        """Atomically write a terminal status.
+
+        Shares _status_lock with cancel(): if cancel() is mid-transition on
+        this job id (reading 'running' to decide whether to write
+        'cancelling'), this call blocks until cancel() finishes, and
+        cancel()'s own lock usage ensures it never overwrites a terminal
+        status written here with 'cancelling' after the fact.
+        """
+        with self._status_lock:
+            db.set_status(conn, job_id, status, error=error, result=result)
 
     def _run(self) -> None:
         conn = db.connect(self.db_path)
@@ -159,14 +206,13 @@ class Worker:
                         self._pending_ids.remove(job_id)
                 self._publish_queue()
 
-                job = db.get_job(conn, job_id)
-                if job is None or job["status"] != "queued":
+                job = self._try_pickup(conn, job_id)
+                if job is None:
                     # Cancelled while queued (or otherwise no longer runnable).
                     with self._events_lock:
                         self._cancel_events.pop(job_id, None)
                     continue
 
-                db.set_status(conn, job_id, "running")
                 self.bus.publish({"type": "job_status", "job_id": job_id, "status": "running"})
 
                 with self._events_lock:
@@ -175,15 +221,17 @@ class Worker:
                 handler = self._handlers.get(job["kind"])
 
                 try:
+                    if handler is None:
+                        raise ValueError(f"no handler for kind {job['kind']!r}")
                     result = handler(job, ctx)
                 except JobCancelled:
-                    db.set_status(conn, job_id, "cancelled")
+                    self._write_terminal(conn, job_id, "cancelled")
                     self.bus.publish({"type": "job_status", "job_id": job_id, "status": "cancelled"})
                 except Exception as exc:  # noqa: BLE001 - handler errors become job errors
-                    db.set_status(conn, job_id, "error", error=str(exc))
+                    self._write_terminal(conn, job_id, "error", error=str(exc))
                     self.bus.publish({"type": "job_status", "job_id": job_id, "status": "error"})
                 else:
-                    db.set_status(conn, job_id, "done", result=result)
+                    self._write_terminal(conn, job_id, "done", result=result)
                     self.bus.publish({"type": "job_status", "job_id": job_id, "status": "done"})
                 finally:
                     with self._events_lock:
