@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class FileNode(BaseModel):
@@ -42,3 +42,10 @@ class MetaResponse(BaseModel):
 class DownloadJobRequest(BaseModel):
     url: str = Field(..., min_length=1)
     category: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def url_must_not_be_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("url must not be blank")
+        return v

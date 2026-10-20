@@ -89,8 +89,10 @@ def create_app(
     @app.post("/api/jobs/download", status_code=202)
     def post_download_job(body: DownloadJobRequest) -> dict:
         category = body.category
-        if category and not (audio_root / category).is_dir():
-            raise ValueError(f"unknown category: {category!r}")
+        if category:
+            resolved = (audio_root / category).resolve()
+            if not resolved.is_relative_to(audio_root.resolve()) or not resolved.is_dir():
+                raise ValueError(f"unknown category: {category!r}")
 
         conn = db.connect(db_path)
         try:

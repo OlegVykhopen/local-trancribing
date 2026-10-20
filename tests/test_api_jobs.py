@@ -67,6 +67,22 @@ def test_post_download_rejects_unknown_category(client):
     assert resp.status_code == 400
 
 
+def test_post_download_rejects_traversal_category(client, roots):
+    # transcripts_root is a real sibling directory of audio_root, so a naive
+    # (audio_root / category).is_dir() check would accept "../transcripts"
+    # and let the downloader write outside audio_root.
+    audio_root, transcripts_root, _db_path = roots
+    assert transcripts_root.is_dir()
+
+    resp = client.post("/api/jobs/download", json={"url": "https://example.com/v", "category": "../transcripts"})
+    assert resp.status_code == 400
+
+
+def test_post_download_rejects_blank_url(client):
+    resp = client.post("/api/jobs/download", json={"url": "   ", "category": "podcast"})
+    assert resp.status_code == 422
+
+
 def test_post_download_allows_empty_category(client):
     resp = client.post("/api/jobs/download", json={"url": "https://example.com/v", "category": ""})
     assert resp.status_code == 202
