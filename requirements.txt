@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+sse-starlette
+yt-dlp
+pytest
+httpx

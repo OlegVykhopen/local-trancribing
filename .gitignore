@@ -1,6 +1,6 @@
-.env
-venv/
+app.db*
 __pycache__/
-transcripts/
-audio_sources/
-.DS_Store
+venv/
+frontend/node_modules/
+frontend/dist/
+.superpowers/
