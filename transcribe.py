@@ -25,6 +25,11 @@ import torch
 load_dotenv()
 
 
+class JobCancelled(Exception):
+    """Raised to cooperatively stop an in-progress transcription job."""
+    pass
+
+
 SUPPORTED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".wma", ".aac", ".webm", ".mp4"}
 
 DEFAULT_SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio_sources")
@@ -65,13 +70,18 @@ def format_duration(seconds):
 def transcribe_file(model, audio_path, output_dir, language=None, hf_token=None,
                     diarize_model=None, align_cache=None, batch_size=16,
                     num_workers=0, num_speakers=None, min_speakers=None,
-                    max_speakers=None, log_fn=print):
+                    max_speakers=None, log_fn=print, *,
+                    progress_fn=None, cancel_event=None, skip_existing=True):
     basename = os.path.basename(audio_path)
     output_path = os.path.join(output_dir, f"{basename}.txt")
 
-    if os.path.exists(output_path):
+    if skip_existing and os.path.exists(output_path):
         log_fn(f"  Skipping (transcript exists): {output_path}")
-        return
+        return None
+
+    def _check_cancelled():
+        if cancel_event is not None and cancel_event.is_set():
+            raise JobCancelled()
 
     # Load audio and show duration
     log_fn(f"  Loading audio: {audio_path}")
@@ -82,9 +92,17 @@ def transcribe_file(model, audio_path, output_dir, language=None, hf_token=None,
     log_fn(f"  Audio duration: {format_duration(duration_secs)} | File size: {file_size_mb:.1f} MB")
 
     # Transcribe
+    _check_cancelled()
     log_fn(f"  Transcribing ({DEVICE}, batch_size={batch_size})...")
     t0 = time.time()
-    result = model.transcribe(audio, language=language, batch_size=batch_size, num_workers=num_workers)
+    transcribe_kwargs = {}
+    if progress_fn is not None or cancel_event is not None:
+        def _wrapped_progress(pct):
+            if progress_fn is not None:
+                progress_fn(pct)
+            _check_cancelled()
+        transcribe_kwargs["progress_callback"] = _wrapped_progress
+    result = model.transcribe(audio, language=language, batch_size=batch_size, num_workers=num_workers, **transcribe_kwargs)
     log_fn(f"  Transcription done in {format_duration(time.time() - t0)}")
 
     detected_language = result.get("language", language or "en")
@@ -94,6 +112,7 @@ def transcribe_file(model, audio_path, output_dir, language=None, hf_token=None,
         log_fn(f"  Language (auto-detected): {detected_language}")
 
     # Align timestamps (reuse cached model if same language)
+    _check_cancelled()
     log_fn("  Aligning timestamps...")
     t0 = time.time()
     if align_cache and align_cache.get("language") == detected_language:
@@ -110,6 +129,7 @@ def transcribe_file(model, audio_path, output_dir, language=None, hf_token=None,
 
     # Speaker diarization (uses pre-loaded model)
     if diarize_model:
+        _check_cancelled()
         log_fn("  Diarizing speakers...")
         t0 = time.time()
         diarize_segments = diarize_model(
@@ -134,6 +154,53 @@ def transcribe_file(model, audio_path, output_dir, language=None, hf_token=None,
         f.write("\n".join(lines))
 
     log_fn(f"  Saved: {output_path}")
+    return output_path
+
+
+def load_whisper_model(model_name, language=None, threads=4, beam_size=5):
+    """Load the WhisperX ASR model. Raises RuntimeError on failure (does not exit)."""
+    try:
+        return whisperx.load_model(
+            model_name, DEVICE, compute_type=COMPUTE_TYPE,
+            language=language, threads=threads,
+            asr_options={"beam_size": beam_size},
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to load WhisperX model '{model_name}': {e}")
+
+
+def load_diarization_model(hf_token, log_fn=print):
+    """Load the pyannote diarization pipeline — try MPS (Apple GPU) first, fall back to CPU.
+
+    Returns the loaded model, or None if loading failed on all devices.
+    """
+    diarize_model = None
+    diarize_device = DIARIZE_DEVICE
+    log_fn(f"Loading diarization model (device: {diarize_device})...")
+    try:
+        diarize_model = DiarizationPipeline(token=hf_token, device=torch.device(diarize_device))
+        log_fn("  Diarization model ready.")
+    except Exception as e:
+        if diarize_device != "cpu":
+            log_fn(f"  WARNING: Failed to load on {diarize_device}: {e}")
+            log_fn("  Falling back to CPU...")
+            try:
+                diarize_device = "cpu"
+                diarize_model = DiarizationPipeline(token=hf_token, device=torch.device("cpu"))
+                log_fn("  Diarization model ready (CPU fallback).")
+            except Exception as e2:
+                log_fn(f"ERROR: Failed to load diarization model: {e2}")
+                diarize_model = None
+        else:
+            log_fn(f"ERROR: Failed to load diarization model: {e}")
+        if diarize_model is None:
+            log_fn("  Common causes:")
+            log_fn("  - HF_TOKEN is invalid or expired")
+            log_fn("  - You haven't accepted model terms at:")
+            log_fn("    https://huggingface.co/pyannote/speaker-diarization-3.1")
+            log_fn("    https://huggingface.co/pyannote/segmentation-3.0")
+            log_fn("  Continuing WITHOUT speaker diarization.\n")
+    return diarize_model
 
 
 def setup_models(whisper_model, hf_token):
@@ -283,43 +350,17 @@ def main():
     # Load whisper model once
     print(f"Loading WhisperX model: {args.model} (device: {DEVICE}, threads: {args.threads})...")
     try:
-        model = whisperx.load_model(
-            args.model, DEVICE, compute_type=COMPUTE_TYPE,
-            language=args.language, threads=args.threads,
-            asr_options={"beam_size": args.beam_size},
+        model = load_whisper_model(
+            args.model, language=args.language, threads=args.threads, beam_size=args.beam_size,
         )
-    except Exception as e:
-        print(f"ERROR: Failed to load WhisperX model '{args.model}': {e}")
+    except RuntimeError as e:
+        print(f"ERROR: {e}")
         sys.exit(1)
 
     # Load diarization model once — try MPS (Apple GPU) first, fall back to CPU
     diarize_model = None
-    diarize_device = DIARIZE_DEVICE
     if use_diarize:
-        print(f"Loading diarization model (device: {diarize_device})...")
-        try:
-            diarize_model = DiarizationPipeline(token=args.hf_token, device=torch.device(diarize_device))
-            print("  Diarization model ready.")
-        except Exception as e:
-            if diarize_device != "cpu":
-                print(f"  WARNING: Failed to load on {diarize_device}: {e}")
-                print("  Falling back to CPU...")
-                try:
-                    diarize_device = "cpu"
-                    diarize_model = DiarizationPipeline(token=args.hf_token, device=torch.device("cpu"))
-                    print("  Diarization model ready (CPU fallback).")
-                except Exception as e2:
-                    print(f"ERROR: Failed to load diarization model: {e2}")
-                    diarize_model = None
-            else:
-                print(f"ERROR: Failed to load diarization model: {e}")
-            if diarize_model is None:
-                print("  Common causes:")
-                print("  - HF_TOKEN is invalid or expired")
-                print("  - You haven't accepted model terms at:")
-                print("    https://huggingface.co/pyannote/speaker-diarization-3.1")
-                print("    https://huggingface.co/pyannote/segmentation-3.0")
-                print("  Continuing WITHOUT speaker diarization.\n")
+        diarize_model = load_diarization_model(args.hf_token, log_fn=print)
 
     # Alignment model cache (reused across files with same language)
     align_cache = {}
