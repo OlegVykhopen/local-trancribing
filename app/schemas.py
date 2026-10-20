@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class FileNode(BaseModel):
@@ -37,3 +37,8 @@ class MetaResponse(BaseModel):
     models: list[str]
     default_model: str
     hf_token_present: bool
+
+
+class DownloadJobRequest(BaseModel):
+    url: str = Field(..., min_length=1)
+    category: str = ""

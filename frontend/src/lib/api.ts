@@ -1,4 +1,4 @@
-import type { Meta, TreeNode } from './types'
+import type { Job, Meta, TreeNode } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = init ? await fetch(path, init) : await fetch(path)
@@ -42,4 +42,31 @@ export async function getTranscript(path: string): Promise<string> {
 
 export async function getMeta(): Promise<Meta> {
   return request<Meta>('/api/meta')
+}
+
+export async function createDownloadJob(params: { url: string; category: string }): Promise<{ job_id: number }> {
+  return request<{ job_id: number }>('/api/jobs/download', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+}
+
+export async function getJobs(kind?: string): Promise<Job[]> {
+  const path = kind ? `/api/jobs?kind=${encodeURIComponent(kind)}` : '/api/jobs'
+  const data = await request<{ jobs: Job[] }>(path)
+  return data.jobs
+}
+
+export async function getJob(id: number): Promise<Job> {
+  return request<Job>(`/api/jobs/${id}`)
+}
+
+export async function getJobLogs(id: number): Promise<{ ts: string; line: string }[]> {
+  const data = await request<{ logs: { ts: string; line: string }[] }>(`/api/jobs/${id}/logs`)
+  return data.logs
+}
+
+export async function cancelJob(id: number): Promise<{ status: string | null }> {
+  return request<{ status: string | null }>(`/api/jobs/${id}/cancel`, { method: 'POST' })
 }
