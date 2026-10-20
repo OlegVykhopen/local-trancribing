@@ -3,6 +3,7 @@ uvicorn[standard]
 sse-starlette
 yt-dlp
 pytest
+pytest-asyncio
 httpx
 opentelemetry-sdk>=1.44.0
 opentelemetry-exporter-otlp>=1.44.0
