@@ -119,6 +119,42 @@ def test_output_dir_mirrors_nested_relative_path(roots, monkeypatch):
     assert result == {"output_path": "consulting/marketing/x.mp3.txt"}
 
 
+def test_output_dir_stays_inside_transcripts_root_for_dotdot_path(roots, monkeypatch):
+    """Regression: a params path like "../audio_sources/x.mp3" resolves to a
+    real file inside audio_root (so source validation passes), but deriving
+    the output dir from the raw string would land it outside transcripts_root.
+    The output location must come from the resolved source path instead."""
+    audio_root, transcripts_root = roots
+    source = audio_root / "x.mp3"
+    source.write_bytes(b"audio")
+
+    _patch_models(monkeypatch)
+
+    captured = {}
+
+    def fake_transcribe_file(model, audio_path, output_dir, **kwargs):
+        captured["output_dir"] = output_dir
+        return str(Path(output_dir) / "x.mp3.txt")
+
+    monkeypatch.setattr(transcriber, "transcribe_file", fake_transcribe_file)
+
+    ctx = FakeContext()
+    cache = transcriber.ModelCache()
+    params = {
+        "path": f"../{audio_root.name}/x.mp3",
+        "model": "base",
+        "language": None,
+        "diarize": False,
+        "num_speakers": None,
+    }
+
+    result = transcriber.run_transcribe(params, ctx, audio_root, transcripts_root, cache)
+
+    assert Path(captured["output_dir"]).resolve() == transcripts_root.resolve()
+    assert result == {"output_path": "x.mp3.txt"}
+    assert not (audio_root / audio_root.name).exists()  # no stray mkdir outside transcripts_root
+
+
 def test_cache_reuses_model_for_same_key_and_evicts_on_change():
     cache = transcriber.ModelCache()
     load_calls = []

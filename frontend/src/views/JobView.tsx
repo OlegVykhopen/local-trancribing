@@ -33,6 +33,7 @@ export function JobView() {
   const [logs, setLogs] = useState<LogLine[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
 
   const logEndRef = useRef<HTMLDivElement | null>(null)
 
@@ -92,9 +93,12 @@ export function JobView() {
 
   async function handleCancel() {
     setCancelling(true)
+    setCancelError(null)
     try {
       const { status } = await cancelJob(jobId)
       if (status) setJob((prev) => (prev ? { ...prev, status } : prev))
+    } catch (err: unknown) {
+      setCancelError(`Cancel failed: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setCancelling(false)
     }
@@ -138,6 +142,13 @@ export function JobView() {
         </div>
         <ProgressBar percent={job.status === 'queued' ? null : job.progress} stage={job.stage ?? ''} />
         {job.error && <p className="text-xs text-red-400">{job.error}</p>}
+        {cancelError && <p className="text-xs text-red-400">{cancelError}</p>}
+        {job.status === 'done' && job.result?.skipped === true && (
+          <p className="text-xs text-amber-400">
+            A transcript for this file already existed, so it was not regenerated. Delete the existing transcript to
+            re-transcribe.
+          </p>
+        )}
       </Card>
 
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">

@@ -7,9 +7,14 @@ import sys
 import glob
 import time
 
-# Re-exec with the project venv's Python if not already running inside it
+# Re-exec with the project venv's Python when run as a CLI outside any venv.
+# Must stay above the whisperx import (which fails under the bare interpreter),
+# and must only fire for direct CLI runs: the FastAPI app imports this module,
+# and an execv during import would silently replace the server process.
+# venv interpreters are symlinks to the base one, so realpath(sys.executable)
+# can't distinguish them — the prefix comparison can.
 _venv_python = os.path.join(os.path.dirname(os.path.abspath(__file__)), "venv", "bin", "python3")
-if os.path.exists(_venv_python) and os.path.realpath(sys.executable) != os.path.realpath(_venv_python):
+if __name__ == "__main__" and os.path.exists(_venv_python) and sys.prefix == sys.base_prefix:
     os.execv(_venv_python, [_venv_python] + sys.argv)
 
 # Ensure ffmpeg 7 libs are found by torchcodec

@@ -107,13 +107,16 @@ def run_transcribe(params: dict, ctx, audio_root: Path, transcripts_root: Path, 
     source = (audio_root / rel_path).resolve()
     if not source.is_relative_to(audio_root) or not source.is_file():
         raise RuntimeError(f"source file not found: {rel_path}")
+    # Derive the output location from the *resolved* source, not the raw
+    # rel_path: a param like "../x/audio_sources/a.mp3" can pass the source
+    # check above while `transcripts_root / rel_dir` would escape the root.
+    rel_dir = source.relative_to(audio_root).parent
 
     model_name = params.get("model") or "base"
     language = params.get("language")
     diarize = bool(params.get("diarize"))
     num_speakers = params.get("num_speakers")
 
-    rel_dir = Path(rel_path).parent
     output_dir = transcripts_root / rel_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 

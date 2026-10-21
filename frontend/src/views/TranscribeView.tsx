@@ -26,19 +26,25 @@ export function TranscribeView() {
 
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const [jobs, setJobs] = useState<Job[]>([])
 
   useEffect(() => {
-    getFiles()
-      .then(setTree)
-      .catch(() => setTree([]))
-    getMeta()
-      .then((m) => {
+    let cancelled = false
+    Promise.all([getFiles(), getMeta()])
+      .then(([files, m]) => {
+        if (cancelled) return
+        setTree(files)
         setMeta(m)
         setModel(m.default_model)
       })
-      .catch(() => setMeta(null))
+      .catch((err: unknown) => {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const loadJobs = useCallback(() => {
@@ -107,6 +113,14 @@ export function TranscribeView() {
 
   const diarizeDisabled = !meta?.hf_token_present
 
+  if (loadError) {
+    return (
+      <div className="flex h-full items-center justify-center p-4">
+        <p className="text-sm text-red-400">{loadError}</p>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full min-h-0 gap-4 p-4">
       <FilePicker nodes={tree} selectedPath={selected?.path} onSelect={setSelected} />
@@ -148,7 +162,7 @@ export function TranscribeView() {
               />
               Identify speakers (diarize)
             </label>
-            {diarizeDisabled && (
+            {meta && diarizeDisabled && (
               <p className="text-xs text-zinc-500">
                 Set HF_TOKEN in .env to enable speaker diarization.
               </p>

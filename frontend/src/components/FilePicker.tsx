@@ -13,8 +13,8 @@ interface FilePickerProps {
 // A files tree tuned for picking a source to transcribe: untranscribed
 // files are the common case (that's what you're here to do) so they render
 // at full opacity, while already-transcribed files are dimmed but remain
-// selectable — re-transcribing one is a valid (if redundant) choice that
-// the backend already handles by reporting the job as "skipped". Reuses
+// selectable — but submitting one is a no-op: the backend keeps the existing
+// transcript and reports the job result as "skipped". Reuses
 // FileTree's recursive renderer (open/close state, indent, dir/file
 // branching) via its fileClassName/renderFileBadge hooks instead of
 // forking the tree.
