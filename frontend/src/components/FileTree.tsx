@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { TreeNode } from '../lib/types'
 import { Badge } from './ui/Badge'
 import { cn } from '../lib/cn'
@@ -61,7 +61,16 @@ interface TreeRowProps {
 }
 
 function TreeRow({ node, onSelectFile, selectedPath, depth, fileClassName, renderFileBadge }: TreeRowProps) {
-  const [open, setOpen] = useState(false)
+  // Auto-expand dirs on the selected file's path so a programmatic selection
+  // (the /files?path= deep link) is actually visible. The '/' suffix prevents
+  // false prefix matches ("ab" vs "abc/d"). The effect only fires when
+  // containsSelected flips to true, so manual collapse afterwards sticks.
+  const containsSelected =
+    node.type === 'dir' && selectedPath != null && selectedPath.startsWith(node.path + '/')
+  const [open, setOpen] = useState(containsSelected)
+  useEffect(() => {
+    if (containsSelected) setOpen(true)
+  }, [containsSelected])
   const indent = { paddingLeft: `${depth * 16 + 8}px` }
 
   if (node.type === 'dir') {

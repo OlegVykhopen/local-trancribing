@@ -52,6 +52,35 @@ def test_post_transcribe_validates_model(client):
     assert resp.status_code == 400
 
 
+def test_post_transcribe_rejects_unknown_language(client):
+    resp = client.post(
+        "/api/jobs/transcribe",
+        json={"path": "podcast/ep1.mp3", "model": "tiny", "language": "zz", "diarize": False},
+    )
+    assert resp.status_code == 400
+    assert "language" in resp.json()["detail"]
+
+
+def test_post_transcribe_normalizes_language_case(client):
+    resp = client.post(
+        "/api/jobs/transcribe",
+        json={"path": "podcast/ep1.mp3", "model": "tiny", "language": "UK", "diarize": False},
+    )
+    assert resp.status_code == 202
+    job = client.get(f"/api/jobs/{resp.json()['job_id']}").json()
+    assert job["params"]["language"] == "uk"
+
+
+def test_post_transcribe_blank_language_means_auto(client):
+    resp = client.post(
+        "/api/jobs/transcribe",
+        json={"path": "podcast/ep1.mp3", "model": "tiny", "language": "  ", "diarize": False},
+    )
+    assert resp.status_code == 202
+    job = client.get(f"/api/jobs/{resp.json()['job_id']}").json()
+    assert job["params"]["language"] is None
+
+
 def test_post_transcribe_rejects_escaping_path(client):
     resp = client.post(
         "/api/jobs/transcribe",

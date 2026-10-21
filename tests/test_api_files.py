@@ -95,6 +95,17 @@ def test_meta_lists_models(client, monkeypatch):
     assert body["hf_token_present"] is False
 
 
+def test_meta_lists_languages(client):
+    resp = client.get("/api/meta")
+    body = resp.json()
+    languages = body["languages"]
+    assert {"code": "uk", "name": "ukrainian"} in languages
+    assert {"code": "en", "name": "english"} in languages
+    # sorted by name so the dropdown reads alphabetically
+    names = [lang["name"] for lang in languages]
+    assert names == sorted(names)
+
+
 def test_meta_hf_token_present(client, monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "some-token")
     resp = client.get("/api/meta")

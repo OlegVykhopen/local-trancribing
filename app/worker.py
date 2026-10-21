@@ -254,6 +254,10 @@ class Worker:
             self._write_terminal(conn, job_id, "error", error=error_text)
             self.bus.publish({"type": "job_status", "job_id": job_id, "status": "error", "error": error_text})
         else:
+            # Handlers may finish mid-stage (e.g. transcribe ends on
+            # "aligning" at 0%) and set_status never touches progress/stage,
+            # so normalize terminal progress here for every job kind.
+            ctx.progress(100, "done")
             self._write_terminal(conn, job_id, "done", result=result)
             self.bus.publish({"type": "job_status", "job_id": job_id, "status": "done", "result": result})
         finally:

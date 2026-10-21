@@ -29,8 +29,14 @@ export interface AppEvent {
   [k: string]: unknown
 }
 
+export interface LanguageOption {
+  code: string
+  name: string
+}
+
 export interface Meta {
   models: string[]
   default_model: string
   hf_token_present: boolean
+  languages: LanguageOption[]
 }

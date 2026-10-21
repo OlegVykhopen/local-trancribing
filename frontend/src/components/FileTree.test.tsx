@@ -82,4 +82,17 @@ describe('FileTree', () => {
     await user.click(screen.getByText('consulting'))
     expect(screen.getByText('marketing')).toBeInTheDocument()
   })
+
+  it('auto-expands every ancestor of the selected path, and manual collapse still wins', async () => {
+    const user = userEvent.setup()
+    render(<FileTree nodes={fixture} onSelectFile={vi.fn()} selectedPath="consulting/marketing/talk.mp3" />)
+
+    // Two levels deep, visible without any clicks.
+    expect(screen.getByText('talk.mp3')).toBeInTheDocument()
+    // Unrelated dirs stay collapsed.
+    expect(screen.queryByText('done.m4a')).not.toBeInTheDocument()
+
+    await user.click(screen.getByText('consulting'))
+    expect(screen.queryByText('talk.mp3')).not.toBeInTheDocument()
+  })
 })

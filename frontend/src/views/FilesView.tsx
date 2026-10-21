@@ -1,10 +1,22 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { getFiles, getTranscript } from '../lib/api'
 import type { TreeNode } from '../lib/types'
 import { FileTree } from '../components/FileTree'
 import { TranscriptViewer } from '../components/TranscriptViewer'
 import { Card } from '../components/ui/Card'
 import { ScrollArea } from '../components/ui/ScrollArea'
+
+function findFile(nodes: TreeNode[], path: string): TreeNode | null {
+  for (const node of nodes) {
+    if (node.type === 'file' && node.path === path) return node
+    if (node.children) {
+      const found = findFile(node.children, path)
+      if (found) return found
+    }
+  }
+  return null
+}
 
 export function FilesView() {
   const [tree, setTree] = useState<TreeNode[]>([])
@@ -15,6 +27,20 @@ export function FilesView() {
   const [content, setContent] = useState<string | null>(null)
   const [transcriptLoading, setTranscriptLoading] = useState(false)
   const [transcriptError, setTranscriptError] = useState<string | null>(null)
+
+  const [searchParams, setSearchParams] = useSearchParams()
+  const pendingPath = searchParams.get('path')
+
+  // Deep link from the job view: /files?path=<audio-rel-path> selects that
+  // file once the tree is loaded, then the param is consumed so it doesn't
+  // keep tracking (or fighting) manual selection.
+  useEffect(() => {
+    if (treeLoading || !pendingPath) return
+    const node = findFile(tree, pendingPath)
+    if (node) handleSelectFile(node)
+    setSearchParams({}, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [treeLoading, pendingPath])
 
   useEffect(() => {
     let cancelled = false

@@ -45,10 +45,16 @@ class TranscriptResponse(BaseModel):
     content: str
 
 
+class LanguageOption(BaseModel):
+    code: str
+    name: str
+
+
 class MetaResponse(BaseModel):
     models: list[str]
     default_model: str
     hf_token_present: bool
+    languages: list[LanguageOption]
 
 
 class DownloadJobRequest(BaseModel):

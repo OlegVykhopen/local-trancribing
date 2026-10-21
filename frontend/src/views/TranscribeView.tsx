@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence } from 'motion/react'
 import { createTranscribeJob, getFiles, getJobs, getMeta } from '../lib/api'
 import { useEvents } from '../lib/useEvents'
@@ -12,8 +12,24 @@ import { ScrollArea } from '../components/ui/ScrollArea'
 import { JobCard } from '../components/JobCard'
 import { FilePicker } from '../components/FilePicker'
 
+function findFile(nodes: TreeNode[], path: string): TreeNode | null {
+  for (const node of nodes) {
+    if (node.type === 'file' && node.path === path) return node
+    const found = node.children ? findFile(node.children, path) : null
+    if (found) return found
+  }
+  return null
+}
+
 export function TranscribeView() {
   const navigate = useNavigate()
+  // Params of a failed job, passed by JobView's Retry button. Captured once on
+  // mount; the history entry is then cleared so Back-navigation can't re-apply
+  // stale params over the user's edits. Values that are no longer valid are
+  // dropped, each with a notice so the substitution isn't silent.
+  const location = useLocation()
+  const [retry] = useState(() => (location.state as { retry?: Record<string, unknown> } | null)?.retry)
+  const [retryNotices, setRetryNotices] = useState<string[]>([])
 
   const [tree, setTree] = useState<TreeNode[]>([])
   const [meta, setMeta] = useState<Meta | null>(null)
@@ -31,13 +47,42 @@ export function TranscribeView() {
   const [jobs, setJobs] = useState<Job[]>([])
 
   useEffect(() => {
+    if (retry) navigate(location.pathname, { replace: true, state: null })
+  }, [retry, navigate, location.pathname])
+
+  useEffect(() => {
     let cancelled = false
     Promise.all([getFiles(), getMeta()])
       .then(([files, m]) => {
         if (cancelled) return
         setTree(files)
         setMeta(m)
-        setModel(m.default_model)
+        const notices: string[] = []
+        const retryModel = typeof retry?.model === 'string' ? retry.model : null
+        if (retryModel && !m.models.includes(retryModel)) {
+          notices.push(`Model "${retryModel}" is unavailable — using ${m.default_model}.`)
+        }
+        setModel(retryModel && m.models.includes(retryModel) ? retryModel : m.default_model)
+        if (!retry) return
+        if (typeof retry.path === 'string') {
+          const file = findFile(files, retry.path)
+          setSelected(file)
+          if (!file) notices.push(`The original file "${retry.path}" no longer exists — pick a file.`)
+        }
+        // Jobs that predate backend language validation may carry an invalid
+        // code (that's why they failed); keep it only if it's selectable.
+        const code = typeof retry.language === 'string' ? retry.language.toLowerCase() : ''
+        const knownCode = m.languages.some((lang) => lang.code === code)
+        setLanguage(knownCode ? code : '')
+        if (code && !knownCode) {
+          notices.push(`Language "${retry.language}" isn't valid — reset to Auto-detect.`)
+        }
+        if (retry.diarize === true && !m.hf_token_present) {
+          notices.push('Speaker diarization is unavailable without HF_TOKEN — turned off.')
+        }
+        setDiarize(retry.diarize === true && m.hf_token_present)
+        if (typeof retry.num_speakers === 'number') setNumSpeakers(String(retry.num_speakers))
+        setRetryNotices(notices)
       })
       .catch((err: unknown) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err))
@@ -45,7 +90,7 @@ export function TranscribeView() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [retry])
 
   const loadJobs = useCallback(() => {
     getJobs('transcribe')
@@ -127,6 +172,11 @@ export function TranscribeView() {
 
       <Card className="flex w-96 shrink-0 flex-col gap-4 p-4">
         <h2 className="text-sm font-medium text-zinc-100">Transcribe</h2>
+        {retryNotices.map((notice) => (
+          <p key={notice} className="text-xs text-amber-400">
+            {notice}
+          </p>
+        ))}
         <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="model" className="text-xs font-medium text-zinc-400">
@@ -144,12 +194,14 @@ export function TranscribeView() {
             <label htmlFor="language" className="text-xs font-medium text-zinc-400">
               Language
             </label>
-            <Input
-              id="language"
-              placeholder="auto"
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-            />
+            <Select id="language" value={language} onChange={(e) => setLanguage(e.target.value)}>
+              <option value="">Auto-detect</option>
+              {(meta?.languages ?? []).map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.name.charAt(0).toUpperCase() + lang.name.slice(1)} ({lang.code})
+                </option>
+              ))}
+            </Select>
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="flex items-center gap-2 text-xs font-medium text-zinc-400">

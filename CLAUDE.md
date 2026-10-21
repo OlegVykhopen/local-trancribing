@@ -64,7 +64,8 @@ cd frontend && npx tsc -b              # typecheck
 ## Development notes
 
 - Existing transcripts are skipped (won't re-transcribe if output file exists); the job result carries `skipped: true` and the UI surfaces it
-- Language is auto-detected unless specified (`-l` in the CLI, Language field in the UI)
+- Language is auto-detected unless specified (`-l` in the CLI, Language dropdown in the UI). The API normalizes codes to lowercase and rejects codes Whisper doesn't accept with 400 (list comes from `whisperx.utils.LANGUAGES`, exposed via `/api/meta`)
+- A failed transcribe job shows a Retry button in the job view; it reopens the transcribe form prefilled from the job's params (file, model, language, diarization, speaker count); values no longer valid are dropped with a visible notice
 - Speaker diarization is optional — works without `HF_TOKEN` but won't separate speakers; when requested but unavailable, the job result carries `diarized: false`
 - Job statuses: `queued → running → done | error`, plus `cancelling → cancelled` (see `JobStatus` in `app/schemas.py`, mirrored in `frontend/src/lib/types.ts`)
 - Jobs orphaned by a server restart are marked `error: "interrupted by restart"` on next startup

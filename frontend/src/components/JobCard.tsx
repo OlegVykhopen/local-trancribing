@@ -36,7 +36,7 @@ export function JobCard({ job }: { job: Job }) {
             <p className="text-xs text-zinc-500">{job.category || 'uncategorized'}</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="text-xs text-zinc-400">{job.progress}%</span>
+            <span className="text-xs text-zinc-400">{job.status === 'done' ? 100 : job.progress}%</span>
             <Badge className={cn(STATUS_CLASSES[job.status] ?? STATUS_CLASSES.queued)}>{job.status}</Badge>
           </div>
         </Card>

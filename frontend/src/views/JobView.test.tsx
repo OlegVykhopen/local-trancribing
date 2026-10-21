@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { JobView } from './JobView'
 import { resetEventsForTests } from '../lib/useEvents'
 import { cancelJob, getJob, getJobLogs } from '../lib/api'
@@ -58,11 +58,23 @@ function makeJob(overrides: Partial<Job> = {}): Job {
   }
 }
 
+function TranscribeRouteProbe() {
+  const location = useLocation()
+  return <p>transcribe page, state: {JSON.stringify(location.state)}</p>
+}
+
+function FilesRouteProbe() {
+  const location = useLocation()
+  return <p>files page, search: {location.search}</p>
+}
+
 function renderJobView() {
   return render(
     <MemoryRouter initialEntries={['/job/1']}>
       <Routes>
         <Route path="/job/:id" element={<JobView />} />
+        <Route path="/transcribe" element={<TranscribeRouteProbe />} />
+        <Route path="/files" element={<FilesRouteProbe />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -125,6 +137,102 @@ describe('JobView', () => {
     renderJobView()
 
     expect(await screen.findByText(/diarization was requested but unavailable/i)).toBeInTheDocument()
+  })
+
+  it('offers Retry on a failed transcribe job and carries its params to the transcribe form', async () => {
+    const params = { path: 'podcast/ep1.mp3', model: 'medium', language: 'UK', diarize: false, num_speakers: null }
+    vi.mocked(getJob).mockResolvedValue(makeJob({ status: 'error', error: 'boom', params }))
+    renderJobView()
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+
+    expect(await screen.findByText(/transcribe page/)).toBeInTheDocument()
+    expect(screen.getByText(new RegExp('podcast/ep1\\.mp3'))).toBeInTheDocument()
+  })
+
+  it('does not offer Retry on a running transcribe job or a failed download job', async () => {
+    vi.mocked(getJob).mockResolvedValue(makeJob())
+    const { unmount } = renderJobView()
+    expect(await screen.findByText('running')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    unmount()
+    resetEventsForTests()
+
+    vi.mocked(getJob).mockResolvedValue(makeJob({ kind: 'download', status: 'error', error: 'boom' }))
+    renderJobView()
+    expect(await screen.findByText('error')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  })
+
+  it('renders a determinate bar on a done job even with stale mid-stage progress', async () => {
+    // Rows written before the worker emitted final progress keep
+    // progress=0, stage="aligning" — the view must still show a full bar.
+    vi.mocked(getJob).mockResolvedValue(
+      makeJob({ status: 'done', progress: 0, stage: 'aligning', result: { output_path: 'podcast/ep1.mp3.txt' } }),
+    )
+    renderJobView()
+
+    expect(await screen.findByText('done')).toBeInTheDocument()
+    expect(screen.getByTestId('progress-bar-fill')).toBeInTheDocument()
+    expect(screen.queryByTestId('progress-bar-indeterminate')).not.toBeInTheDocument()
+  })
+
+  it('stops animating on error and cancelled jobs stuck in an unmetered stage', async () => {
+    vi.mocked(getJob).mockResolvedValue(makeJob({ status: 'error', error: 'boom', progress: 0, stage: 'aligning' }))
+    const { unmount } = renderJobView()
+    expect(await screen.findByText('error')).toBeInTheDocument()
+    expect(screen.queryByTestId('progress-bar-indeterminate')).not.toBeInTheDocument()
+    unmount()
+    resetEventsForTests()
+
+    vi.mocked(getJob).mockResolvedValue(makeJob({ status: 'cancelled', progress: 0, stage: 'diarizing' }))
+    renderJobView()
+    expect(await screen.findByText('cancelled')).toBeInTheDocument()
+    expect(screen.queryByTestId('progress-bar-indeterminate')).not.toBeInTheDocument()
+  })
+
+  it('offers View transcript on a done transcribe job and deep-links to the file', async () => {
+    vi.mocked(getJob).mockResolvedValue(
+      makeJob({ status: 'done', progress: 100, result: { output_path: 'podcast/ep1.mp3.txt' } }),
+    )
+    renderJobView()
+
+    await userEvent.click(await screen.findByRole('button', { name: 'View transcript' }))
+
+    expect(await screen.findByText(/files page/)).toBeInTheDocument()
+    expect(screen.getByText(/\?path=podcast%2Fep1\.mp3/)).toBeInTheDocument()
+  })
+
+  it('offers View transcript on a skipped job — the transcript already exists', async () => {
+    vi.mocked(getJob).mockResolvedValue(
+      makeJob({ status: 'done', progress: 100, result: { skipped: true, output_path: 'podcast/ep1.mp3.txt' } }),
+    )
+    renderJobView()
+
+    expect(await screen.findByRole('button', { name: 'View transcript' })).toBeInTheDocument()
+  })
+
+  it('does not offer View transcript on running, download, or result-less jobs', async () => {
+    vi.mocked(getJob).mockResolvedValue(makeJob())
+    let view = renderJobView()
+    expect(await screen.findByText('running')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View transcript' })).not.toBeInTheDocument()
+    view.unmount()
+    resetEventsForTests()
+
+    vi.mocked(getJob).mockResolvedValue(
+      makeJob({ kind: 'download', status: 'done', progress: 100, result: { output_path: 'x.mp3' } }),
+    )
+    view = renderJobView()
+    expect(await screen.findByText('done')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View transcript' })).not.toBeInTheDocument()
+    view.unmount()
+    resetEventsForTests()
+
+    vi.mocked(getJob).mockResolvedValue(makeJob({ status: 'done', progress: 100, result: null }))
+    renderJobView()
+    expect(await screen.findByText('done')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View transcript' })).not.toBeInTheDocument()
   })
 
   it('shows a disconnected hint and refetches the job on reconnect', async () => {

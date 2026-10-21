@@ -8,3 +8,4 @@ app.db*
 frontend/node_modules/
 frontend/dist/
 .superpowers/
+youtube_downloader/

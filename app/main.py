@@ -14,6 +14,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from app import config, db
 from app.events import EventBus
+from whisperx.utils import LANGUAGES as WHISPER_LANGUAGES
+
 from app.schemas import (
     CategoriesResponse,
     CreateCategoryRequest,
@@ -21,6 +23,7 @@ from app.schemas import (
     FilesResponse,
     JobResponse,
     JobsResponse,
+    LanguageOption,
     MetaResponse,
     TranscribeJobRequest,
     TranscriptResponse,
@@ -102,6 +105,10 @@ def create_app(
             models=config.WHISPER_MODELS,
             default_model="base",
             hf_token_present=bool(os.environ.get("HF_TOKEN")),
+            languages=[
+                LanguageOption(code=code, name=name)
+                for code, name in sorted(WHISPER_LANGUAGES.items(), key=lambda item: item[1])
+            ],
         )
 
     @app.post("/api/jobs/download", status_code=202)
@@ -131,6 +138,13 @@ def create_app(
         if body.model not in config.WHISPER_MODELS:
             raise HTTPException(status_code=400, detail=f"unknown model: {body.model!r}")
 
+        # Whisper only accepts lowercase ISO codes ("UK" fails at model-load
+        # time inside the worker); normalize here so the job never queues
+        # with a code that is guaranteed to fail.
+        language = (body.language or "").strip().lower() or None
+        if language is not None and language not in WHISPER_LANGUAGES:
+            raise HTTPException(status_code=400, detail=f"unknown language: {body.language!r}")
+
         resolved_root = audio_root.resolve()
         resolved = (resolved_root / body.path).resolve()
         if not resolved.is_relative_to(resolved_root) or not resolved.is_file():
@@ -146,7 +160,7 @@ def create_app(
                 params={
                     "path": body.path,
                     "model": body.model,
-                    "language": body.language,
+                    "language": language,
                     "diarize": body.diarize,
                     "num_speakers": body.num_speakers,
                 },

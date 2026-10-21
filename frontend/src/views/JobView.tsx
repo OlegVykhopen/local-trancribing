@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { cancelJob, getJob, getJobLogs } from '../lib/api'
 import { useEvents, useEventsConnected } from '../lib/useEvents'
 import type { AppEvent, Job, JobStatus } from '../lib/types'
@@ -15,6 +15,7 @@ interface LogLine {
 }
 
 const CANCELLABLE_STATUSES = new Set(['queued', 'running', 'cancelling'])
+const TERMINAL_STATUSES = new Set(['done', 'error', 'cancelled'])
 
 const STATUS_CLASSES: Record<string, string> = {
   queued: 'bg-zinc-500/15 text-zinc-300',
@@ -28,6 +29,7 @@ const STATUS_CLASSES: Record<string, string> = {
 export function JobView() {
   const { id } = useParams<{ id: string }>()
   const jobId = Number(id)
+  const navigate = useNavigate()
 
   const [job, setJob] = useState<Job | null>(null)
   const [logs, setLogs] = useState<LogLine[]>([])
@@ -126,6 +128,13 @@ export function JobView() {
 
   const title = typeof job.params?.url === 'string' ? (job.params.url as string) : `Job #${job.id}`
   const canCancel = CANCELLABLE_STATUSES.has(job.status)
+  const canRetry = job.kind === 'transcribe' && job.status === 'error'
+  const audioPath = typeof job.params?.path === 'string' ? (job.params.path as string) : null
+  const canViewTranscript =
+    job.kind === 'transcribe' &&
+    job.status === 'done' &&
+    typeof job.result?.output_path === 'string' &&
+    audioPath !== null
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4">
@@ -142,9 +151,31 @@ export function JobView() {
                 {job.status === 'cancelling' ? 'Cancelling…' : 'Cancel'}
               </Button>
             )}
+            {canRetry && (
+              <Button
+                variant="outline"
+                onClick={() => navigate('/transcribe', { state: { retry: job.params } })}
+              >
+                Retry
+              </Button>
+            )}
+            {canViewTranscript && (
+              <Button
+                variant="outline"
+                onClick={() => navigate(`/files?path=${encodeURIComponent(audioPath!)}`)}
+              >
+                View transcript
+              </Button>
+            )}
           </div>
         </div>
-        <ProgressBar percent={job.status === 'queued' ? null : job.progress} stage={job.stage ?? ''} />
+        {/* done forces a full bar (old DB rows may hold stale progress);
+            other terminal statuses blank the stage so ProgressBar's
+            percent-0-mid-stage heuristic can't keep the bar animating. */}
+        <ProgressBar
+          percent={job.status === 'done' ? 100 : job.status === 'queued' ? null : job.progress}
+          stage={TERMINAL_STATUSES.has(job.status) ? '' : (job.stage ?? '')}
+        />
         {job.error && <p className="text-xs text-red-400">{job.error}</p>}
         {cancelError && <p className="text-xs text-red-400">{cancelError}</p>}
         {!connected && (

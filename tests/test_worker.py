@@ -275,6 +275,61 @@ class RecordingBus:
         self.events.append(event)
 
 
+def test_done_job_gets_final_progress_100(tmp_path):
+    """Handlers may finish mid-stage (transcribe ends on "aligning" at 0%);
+    the worker must normalize terminal progress so the DB row and SSE stream
+    don't leave a done job looking in-progress forever."""
+    db_path = str(tmp_path / "jobs.db")
+    bus = RecordingBus()
+    conn = db.connect(db_path)
+    worker = Worker(db_path, bus)
+
+    def handler(job, ctx):
+        ctx.progress(0, "aligning")
+        return {"output_path": "x.txt", "skipped": True}
+
+    worker.register("transcribe", handler)
+    worker.start()
+    try:
+        jid = db.create_job(conn, "transcribe", {})
+        worker.submit(jid)
+
+        assert wait_until(lambda: db.get_job(conn, jid)["status"] == "done")
+        job = db.get_job(conn, jid)
+    finally:
+        worker.stop()
+        conn.close()
+
+    assert job["progress"] == 100
+    assert job["stage"] == "done"
+
+    # The progress-100 event must precede the done status event so clients
+    # see the natural ordering: bar fills, then status flips.
+    keyed = [(e["type"], e.get("percent"), e.get("status")) for e in bus.events]
+    i_progress = keyed.index(("job_progress", 100.0, None))
+    i_done = keyed.index(("job_status", None, "done"))
+    assert i_progress < i_done
+
+
+def test_failed_job_keeps_last_progress(env):
+    """Error jobs keep their last honest progress — no forced 0 or 100."""
+
+    def handler(job, ctx):
+        ctx.progress(40, "transcribing")
+        raise ValueError("boom")
+
+    env.worker.register("transcribe", handler)
+    env.worker.start()
+
+    jid = db.create_job(env.conn, "transcribe", {})
+    env.worker.submit(jid)
+
+    assert wait_until(lambda: db.get_job(env.conn, jid)["status"] == "error")
+    job = db.get_job(env.conn, jid)
+    assert job["progress"] == 40
+    assert job["stage"] == "transcribing"
+
+
 def test_terminal_error_event_includes_error_text(tmp_path):
     db_path = str(tmp_path / "jobs.db")
     bus = RecordingBus()
