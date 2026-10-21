@@ -53,7 +53,7 @@ class DownloadJobRequest(BaseModel):
 
 class TranscribeJobRequest(BaseModel):
     path: str = Field(..., min_length=1)
-    model: str
+    model: str = Field(..., min_length=1)
     language: str | None = None
     diarize: bool = False
     num_speakers: int | None = None
