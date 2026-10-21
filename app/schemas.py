@@ -49,3 +49,11 @@ class DownloadJobRequest(BaseModel):
         if not v.strip():
             raise ValueError("url must not be blank")
         return v
+
+
+class TranscribeJobRequest(BaseModel):
+    path: str = Field(..., min_length=1)
+    model: str
+    language: str | None = None
+    diarize: bool = False
+    num_speakers: int | None = None

@@ -52,6 +52,20 @@ export async function createDownloadJob(params: { url: string; category: string 
   })
 }
 
+export async function createTranscribeJob(params: {
+  path: string
+  model: string
+  language?: string
+  diarize: boolean
+  num_speakers?: number
+}): Promise<{ job_id: number }> {
+  return request<{ job_id: number }>('/api/jobs/transcribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+}
+
 export async function getJobs(kind?: string): Promise<Job[]> {
   const path = kind ? `/api/jobs?kind=${encodeURIComponent(kind)}` : '/api/jobs'
   const data = await request<{ jobs: Job[] }>(path)

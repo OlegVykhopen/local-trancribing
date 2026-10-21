@@ -20,10 +20,12 @@ from app.schemas import (
     DownloadJobRequest,
     FilesResponse,
     MetaResponse,
+    TranscribeJobRequest,
     TranscriptResponse,
 )
 from app.services import files as files_service
 from app.services.downloader import run_download
+from app.services.transcriber import ModelCache, run_transcribe
 from app.worker import Worker
 
 dotenv.load_dotenv()
@@ -38,6 +40,11 @@ def create_app(
     bus = EventBus()
     worker = Worker(str(db_path), bus)
     worker.register("download", lambda job, ctx: run_download(job["params"], ctx, audio_root))
+    model_cache = ModelCache()
+    worker.register(
+        "transcribe",
+        lambda job, ctx: run_transcribe(job["params"], ctx, audio_root, transcripts_root, model_cache),
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -100,6 +107,38 @@ def create_app(
                 conn,
                 kind="download",
                 params={"url": body.url, "category": category, "format": "audio"},
+                category=category,
+            )
+        finally:
+            conn.close()
+
+        worker.submit(job_id)
+        return {"job_id": job_id}
+
+    @app.post("/api/jobs/transcribe", status_code=202)
+    def post_transcribe_job(body: TranscribeJobRequest) -> dict:
+        if body.model not in config.WHISPER_MODELS:
+            raise ValueError(f"unknown model: {body.model!r}")
+
+        resolved_root = audio_root.resolve()
+        resolved = (resolved_root / body.path).resolve()
+        if not resolved.is_relative_to(resolved_root) or not resolved.is_file():
+            raise ValueError(f"source file not found: {body.path!r}")
+
+        category = Path(body.path).parts[0] if len(Path(body.path).parts) > 1 else ""
+
+        conn = db.connect(db_path)
+        try:
+            job_id = db.create_job(
+                conn,
+                kind="transcribe",
+                params={
+                    "path": body.path,
+                    "model": body.model,
+                    "language": body.language,
+                    "diarize": body.diarize,
+                    "num_speakers": body.num_speakers,
+                },
                 category=category,
             )
         finally:
