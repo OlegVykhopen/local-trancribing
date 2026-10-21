@@ -149,6 +149,43 @@ def test_cache_reuses_model_for_same_key_and_evicts_on_change():
         transcriber.load_whisper_model = original
 
 
+def test_cache_retries_after_failed_load_without_corrupting_key():
+    """Regression: a failed load must not leave _whisper_key pointing at a
+    key whose model was already dropped — otherwise a later request for the
+    OLD key would skip the reload branch and get back the stale None."""
+    cache = transcriber.ModelCache()
+
+    class FakeModel:
+        def __init__(self, name):
+            self.name = name
+
+    def ok_loader(model_name, language=None, threads=4, beam_size=5):
+        return FakeModel(model_name)
+
+    def failing_loader(model_name, language=None, threads=4, beam_size=5):
+        raise RuntimeError(f"failed to load {model_name!r}")
+
+    original = transcriber.load_whisper_model
+    try:
+        key_a = ("base", None, 4, 5)
+        key_b = ("small", None, 4, 5)
+
+        transcriber.load_whisper_model = ok_loader
+        model_a = cache.get_whisper(key_a)
+        assert model_a.name == "base"
+
+        transcriber.load_whisper_model = failing_loader
+        with pytest.raises(RuntimeError):
+            cache.get_whisper(key_b)
+
+        transcriber.load_whisper_model = ok_loader
+        model_a_again = cache.get_whisper(key_a)
+        assert model_a_again is not None
+        assert model_a_again.name == "base"
+    finally:
+        transcriber.load_whisper_model = original
+
+
 def test_stage_progression_reported(roots, monkeypatch):
     audio_root, transcripts_root = roots
     source = audio_root / "x.mp3"

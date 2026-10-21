@@ -63,7 +63,13 @@ class ModelCache:
 
     def get_whisper(self, key):
         if key != self._whisper_key:
+            # Invalidate the key together with the model *before* attempting
+            # the load: if load_whisper_model raises, _whisper_key must not
+            # keep pointing at the old (now-dropped) model, or a later call
+            # for that old key would skip the reload branch and return the
+            # None left behind below.
             self._whisper_model = None
+            self._whisper_key = None
             gc.collect()
             model_name, language, threads, beam_size = key
             self._whisper_model = load_whisper_model(
