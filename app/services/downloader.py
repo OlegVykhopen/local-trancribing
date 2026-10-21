@@ -116,5 +116,13 @@ def run_download(
             final_path = Path(filename)
         if final_path.exists():
             files.append(final_path.relative_to(audio_root).as_posix())
+        else:
+            ctx.log(f"Downloaded file not found on disk: {filename}")
+
+    if not files:
+        # yt-dlp reported success but nothing usable landed on disk (e.g. the
+        # postprocessor failed quietly, or the finished hook never fired).
+        # Completing "done" with an empty file list would read as success.
+        raise RuntimeError("download finished but no output file was found")
 
     return {"files": files}

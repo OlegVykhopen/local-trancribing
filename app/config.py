@@ -11,7 +11,10 @@ FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 PORT = 8756
 HOST = "127.0.0.1"
 
-# External tools
+# External tools.
+# yt-dlp needs the ffmpeg *binary*; the ffmpeg@7 DYLD_LIBRARY_PATH set in
+# run.sh / transcribe.py is only for torchcodec's libraries — two different
+# ffmpeg roles, deliberately not unified.
 FFMPEG_LOCATION = "/opt/homebrew/bin/ffmpeg"
 
 # Whisper models

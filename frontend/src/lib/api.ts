@@ -1,4 +1,4 @@
-import type { Job, Meta, TreeNode } from './types'
+import type { Job, JobStatus, Meta, TreeNode } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = init ? await fetch(path, init) : await fetch(path)
@@ -81,6 +81,8 @@ export async function getJobLogs(id: number): Promise<{ ts: string; line: string
   return data.logs
 }
 
-export async function cancelJob(id: number): Promise<{ status: string | null }> {
-  return request<{ status: string | null }>(`/api/jobs/${id}/cancel`, { method: 'POST' })
+// Rejects with 404 (unknown job) or 409 (job not cancellable) — the
+// endpoint no longer returns a null status for those cases.
+export async function cancelJob(id: number): Promise<{ status: JobStatus }> {
+  return request<{ status: JobStatus }>(`/api/jobs/${id}/cancel`, { method: 'POST' })
 }

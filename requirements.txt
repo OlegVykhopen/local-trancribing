@@ -1,3 +1,6 @@
+whisperx
+torch
+python-dotenv
 fastapi
 uvicorn[standard]
 sse-starlette

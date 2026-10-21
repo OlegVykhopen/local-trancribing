@@ -1,4 +1,5 @@
-"""FastAPI application for the Transcribing Studio (M2: + jobs API, SSE)."""
+"""FastAPI application for the Transcribing Studio: files/categories/transcript
+APIs, job queue, SSE events, and the static frontend mount."""
 
 import asyncio
 import json
@@ -8,7 +9,6 @@ from pathlib import Path
 
 import dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -19,6 +19,8 @@ from app.schemas import (
     CreateCategoryRequest,
     DownloadJobRequest,
     FilesResponse,
+    JobResponse,
+    JobsResponse,
     MetaResponse,
     TranscribeJobRequest,
     TranscriptResponse,
@@ -48,6 +50,10 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        # Both roots are gitignored, so a fresh clone has neither; the files
+        # and categories endpoints iterate them and would 500 otherwise.
+        audio_root.mkdir(parents=True, exist_ok=True)
+        transcripts_root.mkdir(parents=True, exist_ok=True)
         bus.attach_loop(asyncio.get_running_loop())
         conn = db.connect(db_path)
         try:
@@ -62,10 +68,6 @@ def create_app(
     app.state.bus = bus
     app.state.worker = worker
 
-    @app.exception_handler(ValueError)
-    async def value_error_handler(_request: Request, exc: ValueError) -> JSONResponse:
-        return JSONResponse(status_code=400, content={"detail": str(exc)})
-
     @app.get("/api/files", response_model=FilesResponse)
     def get_files() -> FilesResponse:
         tree = files_service.list_tree(audio_root, transcripts_root)
@@ -77,12 +79,21 @@ def create_app(
 
     @app.post("/api/categories", status_code=201)
     def post_category(body: CreateCategoryRequest) -> dict:
-        files_service.create_category(audio_root, transcripts_root, body.name)
+        # The services raise ValueError for caller mistakes; convert those to
+        # 400 here, at the call site, so an incidental ValueError from a bug
+        # elsewhere still surfaces as a 500 instead of a misleading 400.
+        try:
+            files_service.create_category(audio_root, transcripts_root, body.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         return {"name": body.name}
 
     @app.get("/api/transcript", response_model=TranscriptResponse)
     def get_transcript(path: str) -> TranscriptResponse:
-        content = files_service.read_transcript(transcripts_root, path)
+        try:
+            content = files_service.read_transcript(transcripts_root, path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         return TranscriptResponse(path=path, content=content)
 
     @app.get("/api/meta", response_model=MetaResponse)
@@ -99,7 +110,7 @@ def create_app(
         if category:
             resolved = (audio_root / category).resolve()
             if not resolved.is_relative_to(audio_root.resolve()) or not resolved.is_dir():
-                raise ValueError(f"unknown category: {category!r}")
+                raise HTTPException(status_code=400, detail=f"unknown category: {category!r}")
 
         conn = db.connect(db_path)
         try:
@@ -118,12 +129,12 @@ def create_app(
     @app.post("/api/jobs/transcribe", status_code=202)
     def post_transcribe_job(body: TranscribeJobRequest) -> dict:
         if body.model not in config.WHISPER_MODELS:
-            raise ValueError(f"unknown model: {body.model!r}")
+            raise HTTPException(status_code=400, detail=f"unknown model: {body.model!r}")
 
         resolved_root = audio_root.resolve()
         resolved = (resolved_root / body.path).resolve()
         if not resolved.is_relative_to(resolved_root) or not resolved.is_file():
-            raise ValueError(f"source file not found: {body.path!r}")
+            raise HTTPException(status_code=400, detail=f"source file not found: {body.path!r}")
 
         category = Path(body.path).parts[0] if len(Path(body.path).parts) > 1 else ""
 
@@ -147,7 +158,7 @@ def create_app(
         worker.submit(job_id)
         return {"job_id": job_id}
 
-    @app.get("/api/jobs")
+    @app.get("/api/jobs", response_model=JobsResponse)
     def get_jobs(kind: str | None = None) -> dict:
         conn = db.connect(db_path)
         try:
@@ -156,7 +167,7 @@ def create_app(
             conn.close()
         return {"jobs": jobs}
 
-    @app.get("/api/jobs/{job_id}")
+    @app.get("/api/jobs/{job_id}", response_model=JobResponse)
     def get_job_route(job_id: int) -> dict:
         conn = db.connect(db_path)
         try:
@@ -179,7 +190,19 @@ def create_app(
     @app.post("/api/jobs/{job_id}/cancel")
     def post_cancel_job(job_id: int) -> dict:
         status = worker.cancel(job_id)
-        return {"status": status}
+        if status is not None:
+            return {"status": status}
+        # Distinguish the two no-op cases so the UI can say something true:
+        # a job id that doesn't exist vs. a job that can't be cancelled
+        # (already terminal, or orphaned by a server restart).
+        conn = db.connect(db_path)
+        try:
+            job = db.get_job(conn, job_id)
+        finally:
+            conn.close()
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        raise HTTPException(status_code=409, detail=f"job is not cancellable (status: {job['status']})")
 
     @app.get("/api/queue")
     def get_queue() -> dict:

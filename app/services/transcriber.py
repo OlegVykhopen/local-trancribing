@@ -98,9 +98,10 @@ def run_transcribe(params: dict, ctx, audio_root: Path, transcripts_root: Path, 
     under audio_root (missing file, or a path that escapes the root).
     Propagates JobCancelled if ctx.cancel_event is set mid-transcription.
 
-    Returns {"output_path": rel_path} normally, or
-    {"skipped": True, "output_path": rel_path} when transcribe_file skipped
-    an already-existing transcript.
+    Returns {"output_path": rel_path}, plus "skipped": True when
+    transcribe_file skipped an already-existing transcript, plus
+    "diarized": bool when diarization was requested (False means the request
+    was downgraded because no diarizer was available).
     """
     rel_path = params["path"]
     audio_root = Path(audio_root).resolve()
@@ -128,6 +129,8 @@ def run_transcribe(params: dict, ctx, audio_root: Path, transcripts_root: Path, 
     diarize_model = None
     if diarize and hf_token:
         diarize_model = cache.get_diarizer(hf_token, log_fn=ctx.log)
+    elif diarize:
+        ctx.log("Diarization requested but HF_TOKEN is not set on the server.")
     if diarize and diarize_model is None:
         ctx.log("Diarization unavailable — continuing without speaker labels.")
 
@@ -157,6 +160,11 @@ def run_transcribe(params: dict, ctx, audio_root: Path, transcripts_root: Path, 
     )
 
     rel_output = (rel_dir / (source.name + ".txt")).as_posix()
+    result: dict = {"output_path": rel_output}
+    if diarize:
+        # Record whether the explicit diarization request was honored, so the
+        # UI can distinguish "done with speakers" from "silently downgraded".
+        result["diarized"] = diarize_model is not None
     if output_path is None:
-        return {"skipped": True, "output_path": rel_output}
-    return {"output_path": rel_output}
+        result["skipped"] = True
+    return result

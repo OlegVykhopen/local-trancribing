@@ -50,7 +50,8 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 
 def _row_to_job(row: sqlite3.Row) -> dict:
     job = dict(row)
-    job["params"] = json.loads(job.pop("params_json")) if job.get("params_json") is not None else None
+    params_json = job.pop("params_json")
+    job["params"] = json.loads(params_json) if params_json is not None else None
     result_json = job.pop("result_json")
     job["result"] = json.loads(result_json) if result_json is not None else None
     return job

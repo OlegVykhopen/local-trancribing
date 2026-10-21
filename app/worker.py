@@ -12,17 +12,14 @@ opens its own short-lived connection via `app.db.connect`.
 """
 
 import queue
+import sys
 import threading
 import time
+import traceback
 from typing import Callable
 
 from app import db
-
-try:
-    from transcribe import JobCancelled
-except ImportError:  # pragma: no cover - transcribe.py defines this in a later task
-    class JobCancelled(Exception):
-        pass
+from transcribe import JobCancelled
 
 
 _STOP = object()
@@ -44,6 +41,10 @@ class JobContext:
         self._bus.publish({"type": "job_log", "job_id": self.job_id, "line": line})
 
     def progress(self, percent: float, stage: str, detail: str = "") -> None:
+        # Clamp here, at the single entry point, so the 0-100 invariant holds
+        # everywhere downstream (DB column, SSE payloads, JobResponse's
+        # ge/le validation) regardless of what a handler reports.
+        percent = min(100.0, max(0.0, percent))
         now = time.monotonic()
         # percent >= 100 always forces a write: without this, a final call that
         # lands within the throttle window (<1s, <2% delta) would be dropped and
@@ -101,7 +102,9 @@ class Worker:
         self._thread.start()
 
     def stop(self) -> None:
-        """Test-only teardown: ask the loop to exit and wait briefly for it."""
+        """Shutdown teardown (lifespan exit and tests): ask the loop to exit
+        and wait briefly for it. A running job is not interrupted; it is
+        marked interrupted on the next startup via db.mark_interrupted."""
         self._queue.put(_STOP)
         if self._thread is not None:
             self._thread.join(timeout=2)
@@ -201,42 +204,59 @@ class Worker:
                 if job_id is _STOP:
                     break
 
-                with self._pending_lock:
-                    if job_id in self._pending_ids:
-                        self._pending_ids.remove(job_id)
-                self._publish_queue()
-
-                job = self._try_pickup(conn, job_id)
-                if job is None:
-                    # Cancelled while queued (or otherwise no longer runnable).
-                    with self._events_lock:
-                        self._cancel_events.pop(job_id, None)
-                    continue
-
-                self.bus.publish({"type": "job_status", "job_id": job_id, "status": "running"})
-
-                with self._events_lock:
-                    cancel_event = self._cancel_events.get(job_id, threading.Event())
-                ctx = JobContext(conn, self.bus, job_id, cancel_event)
-                handler = self._handlers.get(job["kind"])
-
                 try:
-                    if handler is None:
-                        raise ValueError(f"no handler for kind {job['kind']!r}")
-                    result = handler(job, ctx)
-                except JobCancelled:
-                    self._write_terminal(conn, job_id, "cancelled")
-                    self.bus.publish({"type": "job_status", "job_id": job_id, "status": "cancelled"})
-                except Exception as exc:  # noqa: BLE001 - handler errors become job errors
-                    error_text = str(exc)
-                    self._write_terminal(conn, job_id, "error", error=error_text)
-                    self.bus.publish({"type": "job_status", "job_id": job_id, "status": "error", "error": error_text})
-                else:
-                    self._write_terminal(conn, job_id, "done", result=result)
-                    self.bus.publish({"type": "job_status", "job_id": job_id, "status": "done", "result": result})
-                finally:
-                    with self._events_lock:
-                        self._cancel_events.pop(job_id, None)
-                    self._publish_queue()
+                    self._run_one(conn, job_id)
+                except Exception:  # noqa: BLE001
+                    # Infrastructure failure (e.g. sqlite "database is
+                    # locked" during a status write). Losing this job's
+                    # bookkeeping is bad; silently killing the daemon thread
+                    # — leaving every future job queued forever — is worse.
+                    print(
+                        f"worker: unexpected error processing job {job_id}:\n{traceback.format_exc()}",
+                        file=sys.stderr,
+                    )
         finally:
             conn.close()
+
+    def _run_one(self, conn, job_id: int) -> None:
+        with self._pending_lock:
+            if job_id in self._pending_ids:
+                self._pending_ids.remove(job_id)
+        self._publish_queue()
+
+        job = self._try_pickup(conn, job_id)
+        if job is None:
+            # Cancelled while queued (or otherwise no longer runnable).
+            with self._events_lock:
+                self._cancel_events.pop(job_id, None)
+            return
+
+        self.bus.publish({"type": "job_status", "job_id": job_id, "status": "running"})
+
+        with self._events_lock:
+            cancel_event = self._cancel_events.get(job_id, threading.Event())
+        ctx = JobContext(conn, self.bus, job_id, cancel_event)
+        handler = self._handlers.get(job["kind"])
+
+        try:
+            if handler is None:
+                raise ValueError(f"no handler for kind {job['kind']!r}")
+            result = handler(job, ctx)
+        except JobCancelled:
+            self._write_terminal(conn, job_id, "cancelled")
+            self.bus.publish({"type": "job_status", "job_id": job_id, "status": "cancelled"})
+        except Exception as exc:  # noqa: BLE001 - handler errors become job errors
+            # str(exc) can be empty (bare exceptions); fall back to the type
+            # name so the job never shows status "error" with no message, and
+            # put the full traceback in the job log for debuggability.
+            error_text = str(exc) or type(exc).__name__
+            db.append_log(conn, job_id, traceback.format_exc())
+            self._write_terminal(conn, job_id, "error", error=error_text)
+            self.bus.publish({"type": "job_status", "job_id": job_id, "status": "error", "error": error_text})
+        else:
+            self._write_terminal(conn, job_id, "done", result=result)
+            self.bus.publish({"type": "job_status", "job_id": job_id, "status": "done", "result": result})
+        finally:
+            with self._events_lock:
+                self._cancel_events.pop(job_id, None)
+            self._publish_queue()

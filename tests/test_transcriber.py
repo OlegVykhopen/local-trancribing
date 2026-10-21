@@ -281,9 +281,46 @@ def test_diarization_unavailable_logs_explicit_line(roots, monkeypatch):
     cache = transcriber.ModelCache()
     params = {"path": "x.mp3", "model": "base", "language": None, "diarize": True, "num_speakers": None}
 
-    transcriber.run_transcribe(params, ctx, audio_root, transcripts_root, cache)
+    result = transcriber.run_transcribe(params, ctx, audio_root, transcripts_root, cache)
 
     assert "Diarization unavailable — continuing without speaker labels." in ctx.logs
+    # The downgrade is also recorded in the result so the UI can surface it.
+    assert result["diarized"] is False
+
+
+def test_diarization_without_token_logs_cause_and_flags_result(roots, monkeypatch):
+    audio_root, transcripts_root = roots
+    (audio_root / "x.mp3").write_bytes(b"audio")
+
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    _patch_models(monkeypatch, diarizer=object())
+    monkeypatch.setattr(transcriber, "transcribe_file", lambda *a, **k: str(transcripts_root / "x.mp3.txt"))
+
+    ctx = FakeContext()
+    cache = transcriber.ModelCache()
+    params = {"path": "x.mp3", "model": "base", "language": None, "diarize": True, "num_speakers": None}
+
+    result = transcriber.run_transcribe(params, ctx, audio_root, transcripts_root, cache)
+
+    assert "Diarization requested but HF_TOKEN is not set on the server." in ctx.logs
+    assert result["diarized"] is False
+
+
+def test_diarization_success_flags_result_true(roots, monkeypatch):
+    audio_root, transcripts_root = roots
+    (audio_root / "x.mp3").write_bytes(b"audio")
+
+    monkeypatch.setenv("HF_TOKEN", "fake-token")
+    _patch_models(monkeypatch, diarizer=object())
+    monkeypatch.setattr(transcriber, "transcribe_file", lambda *a, **k: str(transcripts_root / "x.mp3.txt"))
+
+    ctx = FakeContext()
+    cache = transcriber.ModelCache()
+    params = {"path": "x.mp3", "model": "base", "language": None, "diarize": True, "num_speakers": None}
+
+    result = transcriber.run_transcribe(params, ctx, audio_root, transcripts_root, cache)
+
+    assert result["diarized"] is True
 
 
 def test_skip_existing_reported(roots, monkeypatch):

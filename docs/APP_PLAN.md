@@ -1,5 +1,12 @@
 # Transcribing Studio — local web app for YouTube download + transcription flows
 
+> **Status (as of M3, 2026-10-21):** implemented, with two deviations from this plan.
+> The frontend shipped as React + TypeScript + Vite + Tailwind in `frontend/`
+> (not the no-build vanilla JS `app/static/` described below), and `docs/PRD.md`
+> was never written. The pipeline (combined URL→Transcript) module is **not yet
+> implemented** — only Download and Transcribe exist. Current authoritative
+> docs: the root `CLAUDE.md`.
+
 ## Context
 
 Today two flows run via terminal: (1) downloading YouTube media with the yt-dlp CLI (no script exists — `youtube_downloader/` is a cookbook + downloaded files), and (2) transcribing audio via `transcribe.py` (WhisperX + pyannote diarization). The flows are disconnected — downloads are manually copied/renamed into `audio_sources/<category>/`. Goal: a local app with UI — modules in a left panel, per-module history, parameterized job launch, live progress, and a file browser marking which sources already have transcripts.

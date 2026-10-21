@@ -6,10 +6,13 @@ export interface TreeNode {
   children?: TreeNode[]
 }
 
+// Mirrors JobStatus in app/schemas.py.
+export type JobStatus = 'queued' | 'running' | 'cancelling' | 'cancelled' | 'done' | 'error'
+
 export interface Job {
   id: number
   kind: 'download' | 'transcribe' | 'pipeline'
-  status: string
+  status: JobStatus
   params: Record<string, unknown>
   category: string | null
   progress: number

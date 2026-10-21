@@ -76,6 +76,61 @@ def test_handler_exception_sets_error(env):
     assert wait_until(lambda: db.get_job(env.conn, jid)["status"] == "error")
     job = db.get_job(env.conn, jid)
     assert job["error"] == "boom"
+    # The traceback lands in the job log for debuggability.
+    logs = "\n".join(entry["line"] for entry in db.get_logs(env.conn, jid))
+    assert "ValueError: boom" in logs
+
+
+def test_handler_exception_with_empty_message_uses_type_name(env):
+    class WeirdError(Exception):
+        pass
+
+    def handler(job, ctx):
+        raise WeirdError()
+
+    env.worker.register("download", handler)
+    env.worker.start()
+
+    jid = db.create_job(env.conn, "download", {})
+    env.worker.submit(jid)
+
+    assert wait_until(lambda: db.get_job(env.conn, jid)["status"] == "error")
+    assert db.get_job(env.conn, jid)["error"] == "WeirdError"
+
+
+def test_worker_thread_survives_infrastructure_failure(env, monkeypatch, capsys):
+    """A failure outside the handler try/except (e.g. sqlite 'database is
+    locked' during the terminal status write) must not kill the worker
+    thread — later jobs still run."""
+    done = []
+
+    def handler(job, ctx):
+        return {}
+
+    env.worker.register("download", handler)
+
+    original_set_status = db.set_status
+    broken_once = {"armed": True}
+
+    def flaky_set_status(conn, job_id, status, **kwargs):
+        if status == "done" and broken_once["armed"]:
+            broken_once["armed"] = False
+            raise RuntimeError("database is locked")
+        original_set_status(conn, job_id, status, **kwargs)
+        if status == "done":
+            done.append(job_id)
+
+    monkeypatch.setattr(db, "set_status", flaky_set_status)
+    env.worker.start()
+
+    jid1 = db.create_job(env.conn, "download", {})
+    jid2 = db.create_job(env.conn, "download", {})
+    env.worker.submit(jid1)
+    env.worker.submit(jid2)
+
+    # Job 1's terminal write blew up, but job 2 must still complete.
+    assert wait_until(lambda: jid2 in done)
+    assert "unexpected error processing job" in capsys.readouterr().err
 
 
 def test_cancel_queued_job_never_runs(env):

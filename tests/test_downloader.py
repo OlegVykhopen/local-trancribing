@@ -49,7 +49,10 @@ def test_opts_built_correctly(tmp_path, monkeypatch):
     ctx = FakeContext()
     params = {"url": "https://youtu.be/abc", "category": "lectures", "format": "audio"}
 
-    downloader.run_download(params, ctx, audio_root)
+    # This fake never produces a file, so run_download raises at the end —
+    # the opts under test are captured before that.
+    with pytest.raises(RuntimeError, match="no output file"):
+        downloader.run_download(params, ctx, audio_root)
 
     target_dir = audio_root / "lectures"
     assert target_dir.is_dir()
@@ -79,7 +82,9 @@ def test_progress_hook_maps_to_ctx(tmp_path, monkeypatch):
             hook({"status": "downloading", "downloaded_bytes": 50, "total_bytes": 200, "speed": 1048576, "eta": 65})
             hook({"status": "downloading", "downloaded_bytes": 10, "total_bytes_estimate": 100})
             hook({"status": "downloading", "downloaded_bytes": 10})
-            hook({"status": "finished", "filename": str(tmp_path / "x.webm")})
+            output = tmp_path / "audio" / "x.webm"
+            output.write_bytes(b"audio")
+            hook({"status": "finished", "filename": str(output)})
 
     monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
 
@@ -199,3 +204,35 @@ def test_result_lists_relative_paths(tmp_path, monkeypatch):
     result = downloader.run_download(params, ctx, audio_root)
 
     assert result == {"files": ["podcasts/My Video [abc123].mp3"]}
+
+
+def test_download_with_no_locatable_output_raises(tmp_path, monkeypatch):
+    """A download that yt-dlp reports as successful but which leaves no file
+    on disk must fail the job, not complete 'done' with an empty file list."""
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def download(self, urls):
+            # finished hook fires, but neither the raw file nor the .mp3 exists
+            self.opts["progress_hooks"][0](
+                {"status": "finished", "filename": str(tmp_path / "audio" / "ghost.webm")}
+            )
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+
+    audio_root = tmp_path / "audio"
+    audio_root.mkdir()
+    ctx = FakeContext()
+    params = {"url": "u", "category": "", "format": "audio"}
+
+    with pytest.raises(RuntimeError, match="no output file"):
+        downloader.run_download(params, ctx, audio_root)
+    assert any("not found on disk" in line for line in ctx.logs)

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { AnimatePresence } from 'motion/react'
 import { createTranscribeJob, getFiles, getJobs, getMeta } from '../lib/api'
 import { useEvents } from '../lib/useEvents'
-import type { AppEvent, Job, Meta, TreeNode } from '../lib/types'
+import type { AppEvent, Job, JobStatus, Meta, TreeNode } from '../lib/types'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Select } from '../components/ui/Select'
@@ -68,7 +68,7 @@ export function TranscribeView() {
             job.id === jobId
               ? {
                   ...job,
-                  ...(event.type === 'job_status' ? { status: String(event.status) } : {}),
+                  ...(event.type === 'job_status' ? { status: event.status as JobStatus } : {}),
                   ...(event.type === 'job_progress'
                     ? { progress: Math.round(Number(event.percent) || 0), stage: String(event.stage) }
                     : {}),

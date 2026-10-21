@@ -1,32 +1,31 @@
-# React + TypeScript + Vite
+# Transcribing Studio — frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + TypeScript + Vite + Tailwind UI for the FastAPI backend in `../app/`.
 
-Currently, two official plugins are available:
+## Dev workflow
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The dev server proxies `/api` to `127.0.0.1:8756` (see `vite.config.ts`), so the backend must be running:
 
-## React Compiler
+```bash
+# terminal 1 — backend (NO_BROWSER=1 skips auto-opening the built app)
+cd .. && NO_BROWSER=1 ./run.sh
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+# terminal 2 — frontend with hot reload
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Build for run.sh
+
+`../run.sh` serves `frontend/dist` from the backend process:
+
+```bash
+npm run build
+```
+
+## Tests & checks
+
+```bash
+npx vitest run   # unit tests (jsdom)
+npx tsc -b       # typecheck
+npm run lint     # oxlint
+```

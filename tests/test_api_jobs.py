@@ -102,14 +102,19 @@ def test_get_job_and_logs(client):
     assert any(entry["line"] == "fake download started" for entry in logs)
 
 
-def test_cancel_endpoint_noop_on_done_job(client):
+def test_cancel_endpoint_conflict_on_done_job(client):
     resp = client.post("/api/jobs/download", json={"url": "https://example.com/v", "category": "podcast"})
     job_id = resp.json()["job_id"]
     assert wait_until(lambda: client.get(f"/api/jobs/{job_id}").json()["status"] == "done")
 
     cancel_resp = client.post(f"/api/jobs/{job_id}/cancel")
-    assert cancel_resp.status_code == 200
-    assert cancel_resp.json() == {"status": None}
+    assert cancel_resp.status_code == 409
+    assert "not cancellable" in cancel_resp.json()["detail"]
+
+
+def test_cancel_endpoint_404_on_unknown_job(client):
+    cancel_resp = client.post("/api/jobs/999999/cancel")
+    assert cancel_resp.status_code == 404
 
 
 def test_unknown_job_404(client):

@@ -42,7 +42,13 @@ class EventBus:
             subscribers = list(self._subscribers)
 
         for q in subscribers:
-            loop.call_soon_threadsafe(self._enqueue, q, event)
+            try:
+                loop.call_soon_threadsafe(self._enqueue, q, event)
+            except RuntimeError:
+                # The loop is closing/closed (app shutdown). Dropping the
+                # event is fine; raising here would propagate into the worker
+                # thread's run loop and kill it.
+                return
 
     @staticmethod
     def _enqueue(q: asyncio.Queue, event: dict) -> None:

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { cancelJob, getJob, getJobLogs } from '../lib/api'
-import { useEvents } from '../lib/useEvents'
-import type { AppEvent, Job } from '../lib/types'
+import { useEvents, useEventsConnected } from '../lib/useEvents'
+import type { AppEvent, Job, JobStatus } from '../lib/types'
 import { Card } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -37,22 +37,25 @@ export function JobView() {
 
   const logEndRef = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => {
+  // Also used as the reconnect handler: SSE events missed while the stream
+  // was down (including a terminal job_status) are gone for good, so the
+  // only way back to truth is refetching.
+  const refresh = useCallback(() => {
     if (!Number.isFinite(jobId)) return
-    let cancelled = false
     Promise.all([getJob(jobId), getJobLogs(jobId)])
       .then(([jobData, logData]) => {
-        if (cancelled) return
         setJob(jobData)
         setLogs(logData)
+        setLoadError(null)
       })
       .catch((err: unknown) => {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err))
+        setLoadError(err instanceof Error ? err.message : String(err))
       })
-    return () => {
-      cancelled = true
-    }
   }, [jobId])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
 
   const handleEvent = useCallback(
     (event: AppEvent) => {
@@ -63,7 +66,7 @@ export function JobView() {
           prev
             ? {
                 ...prev,
-                status: String(event.status),
+                status: event.status as JobStatus,
                 error: 'error' in event ? ((event.error as string | null) ?? null) : prev.error,
                 result: 'result' in event ? ((event.result as Record<string, unknown> | null) ?? null) : prev.result,
               }
@@ -85,7 +88,8 @@ export function JobView() {
     },
     [jobId],
   )
-  useEvents(handleEvent)
+  useEvents(handleEvent, refresh)
+  const connected = useEventsConnected()
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: 'end' })
@@ -96,7 +100,7 @@ export function JobView() {
     setCancelError(null)
     try {
       const { status } = await cancelJob(jobId)
-      if (status) setJob((prev) => (prev ? { ...prev, status } : prev))
+      setJob((prev) => (prev ? { ...prev, status } : prev))
     } catch (err: unknown) {
       setCancelError(`Cancel failed: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
@@ -143,10 +147,19 @@ export function JobView() {
         <ProgressBar percent={job.status === 'queued' ? null : job.progress} stage={job.stage ?? ''} />
         {job.error && <p className="text-xs text-red-400">{job.error}</p>}
         {cancelError && <p className="text-xs text-red-400">{cancelError}</p>}
+        {!connected && (
+          <p className="text-xs text-amber-400">Live updates disconnected — reconnecting…</p>
+        )}
         {job.status === 'done' && job.result?.skipped === true && (
           <p className="text-xs text-amber-400">
             A transcript for this file already existed, so it was not regenerated. Delete the existing transcript to
             re-transcribe.
+          </p>
+        )}
+        {job.status === 'done' && job.result?.diarized === false && (
+          <p className="text-xs text-amber-400">
+            Speaker diarization was requested but unavailable — the transcript has no speaker labels. See the log
+            below for the cause.
           </p>
         )}
       </Card>
