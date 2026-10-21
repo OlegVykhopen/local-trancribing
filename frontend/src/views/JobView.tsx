@@ -58,7 +58,16 @@ export function JobView() {
       if (event.job_id !== jobId) return
 
       if (event.type === 'job_status') {
-        setJob((prev) => (prev ? { ...prev, status: String(event.status) } : prev))
+        setJob((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: String(event.status),
+                error: 'error' in event ? ((event.error as string | null) ?? null) : prev.error,
+                result: 'result' in event ? ((event.result as Record<string, unknown> | null) ?? null) : prev.result,
+              }
+            : prev,
+        )
       } else if (event.type === 'job_progress') {
         setJob((prev) =>
           prev

@@ -208,6 +208,43 @@ def test_rapid_progress_calls_final_value_persisted(env):
     assert db.get_job(env.conn, jid)["progress"] == 100
 
 
+class RecordingBus:
+    """Fake bus that records published events instead of fanning them out
+    over asyncio — used to assert on event payloads without needing an
+    attached event loop (see app.events.EventBus.publish)."""
+
+    def __init__(self):
+        self.events = []
+
+    def publish(self, event):
+        self.events.append(event)
+
+
+def test_terminal_error_event_includes_error_text(tmp_path):
+    db_path = str(tmp_path / "jobs.db")
+    bus = RecordingBus()
+    conn = db.connect(db_path)
+    worker = Worker(db_path, bus)
+
+    def handler(job, ctx):
+        raise ValueError("boom")
+
+    worker.register("download", handler)
+    worker.start()
+    try:
+        jid = db.create_job(conn, "download", {})
+        worker.submit(jid)
+
+        assert wait_until(lambda: db.get_job(conn, jid)["status"] == "error")
+    finally:
+        worker.stop()
+        conn.close()
+
+    error_events = [e for e in bus.events if e.get("type") == "job_status" and e.get("status") == "error"]
+    assert error_events
+    assert error_events[-1]["error"] == "boom"
+
+
 def test_unknown_kind_sets_error(env):
     env.worker.start()
 

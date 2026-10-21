@@ -78,11 +78,11 @@ class ModelCache:
             self._whisper_key = key
         return self._whisper_model
 
-    def get_diarizer(self, hf_token):
+    def get_diarizer(self, hf_token, log_fn=print):
         model = self._diarizers.get(hf_token)
         if model is not None:
             return model
-        model = load_diarization_model(hf_token)
+        model = load_diarization_model(hf_token, log_fn=log_fn)
         if model is not None:
             self._diarizers[hf_token] = model
         return model
@@ -124,7 +124,9 @@ def run_transcribe(params: dict, ctx, audio_root: Path, transcripts_root: Path, 
     hf_token = os.environ.get("HF_TOKEN")
     diarize_model = None
     if diarize and hf_token:
-        diarize_model = cache.get_diarizer(hf_token)
+        diarize_model = cache.get_diarizer(hf_token, log_fn=ctx.log)
+    if diarize and diarize_model is None:
+        ctx.log("Diarization unavailable — continuing without speaker labels.")
 
     def progress_fn(pct):
         ctx.progress(pct, "transcribing")

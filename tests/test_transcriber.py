@@ -225,6 +225,31 @@ def test_stage_progression_reported(roots, monkeypatch):
     assert "  Diarizing speakers..." in ctx.logs
 
 
+def test_diarization_unavailable_logs_explicit_line(roots, monkeypatch):
+    """When diarize was requested but the (fake) diarizer loader returns
+    None, run_transcribe must emit an explicit job-log line so the failure
+    is visible in the job's log instead of only on server stdout."""
+    audio_root, transcripts_root = roots
+    source = audio_root / "x.mp3"
+    source.write_bytes(b"audio")
+
+    monkeypatch.setenv("HF_TOKEN", "fake-token")
+    _patch_models(monkeypatch, diarizer=None)
+
+    def fake_transcribe_file(model, audio_path, output_dir, **kwargs):
+        return str(Path(output_dir) / "x.mp3.txt")
+
+    monkeypatch.setattr(transcriber, "transcribe_file", fake_transcribe_file)
+
+    ctx = FakeContext()
+    cache = transcriber.ModelCache()
+    params = {"path": "x.mp3", "model": "base", "language": None, "diarize": True, "num_speakers": None}
+
+    transcriber.run_transcribe(params, ctx, audio_root, transcripts_root, cache)
+
+    assert "Diarization unavailable — continuing without speaker labels." in ctx.logs
+
+
 def test_skip_existing_reported(roots, monkeypatch):
     audio_root, transcripts_root = roots
     source = audio_root / "x.mp3"

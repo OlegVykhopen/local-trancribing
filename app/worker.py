@@ -228,11 +228,12 @@ class Worker:
                     self._write_terminal(conn, job_id, "cancelled")
                     self.bus.publish({"type": "job_status", "job_id": job_id, "status": "cancelled"})
                 except Exception as exc:  # noqa: BLE001 - handler errors become job errors
-                    self._write_terminal(conn, job_id, "error", error=str(exc))
-                    self.bus.publish({"type": "job_status", "job_id": job_id, "status": "error"})
+                    error_text = str(exc)
+                    self._write_terminal(conn, job_id, "error", error=error_text)
+                    self.bus.publish({"type": "job_status", "job_id": job_id, "status": "error", "error": error_text})
                 else:
                     self._write_terminal(conn, job_id, "done", result=result)
-                    self.bus.publish({"type": "job_status", "job_id": job_id, "status": "done"})
+                    self.bus.publish({"type": "job_status", "job_id": job_id, "status": "done", "result": result})
                 finally:
                     with self._events_lock:
                         self._cancel_events.pop(job_id, None)
