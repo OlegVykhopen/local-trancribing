@@ -21,6 +21,8 @@ interface FilePickerProps {
   onUpload: (file: File, category: string) => Promise<void>
   /** Deletes the source audio file; rejects with the message to display. */
   onDelete: (node: TreeNode) => Promise<void>
+  /** Tree-level message (e.g. a refresh failure after a successful mutation). */
+  notice?: string | null
 }
 
 function errorMessage(err: unknown): string {
@@ -39,7 +41,16 @@ function errorMessage(err: unknown): string {
 //
 // Also owns the upload row (header) and delete-source confirm (footer) UI
 // state; the API calls and tree refresh belong to the parent.
-export function FilePicker({ nodes, selectedPath, onSelect, categories, accept, onUpload, onDelete }: FilePickerProps) {
+export function FilePicker({
+  nodes,
+  selectedPath,
+  onSelect,
+  categories,
+  accept,
+  onUpload,
+  onDelete,
+  notice,
+}: FilePickerProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [category, setCategory] = useState('')
@@ -145,6 +156,7 @@ export function FilePicker({ nodes, selectedPath, onSelect, categories, accept, 
           {uploadError && <p className="text-xs text-red-400">{uploadError}</p>}
         </div>
       )}
+      {notice && <p className="shrink-0 border-b border-zinc-800 px-4 py-2 text-xs text-amber-400">{notice}</p>}
       <ScrollArea className="min-h-0 flex-1 py-2">
         <FileTree
           nodes={nodes}

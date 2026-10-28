@@ -236,3 +236,26 @@ def test_save_upload_file_mode_respects_umask(roots):
     umask = os.umask(0)
     os.umask(umask)
     assert mode == 0o666 & ~umask  # same as a regular open(..., "wb"), not tempfile's 0600
+
+
+class _RacingStream(io.BytesIO):
+    """Drops a same-name file into the target dir on first read (simulates a
+    yt-dlp download or a second upload landing mid-copy)."""
+
+    def __init__(self, data: bytes, racer: "Path"):
+        super().__init__(data)
+        self._racer = racer
+
+    def read(self, size=-1):
+        if not self._racer.exists():
+            self._racer.write_bytes(b"original")
+        return super().read(size)
+
+
+def test_save_upload_never_overwrites_a_file_that_appears_mid_copy(roots):
+    audio_root, _ = roots
+    racer = audio_root / "therapy" / "race.mp3"
+    with pytest.raises(FileExistsError):
+        files.save_upload(audio_root, "therapy", "race.mp3", _RacingStream(b"upload", racer))
+    assert racer.read_bytes() == b"original"
+    assert not list(audio_root.glob("**/.upload-*"))

@@ -1,7 +1,7 @@
 # Files / Transcripts restructure: upload, delete, copy
 
 Date: 2026-10-28
-Status: approved design, not yet built
+Status: built (see docs/superpowers/plans/2026-10-28-files-transcripts-restructure.md)
 
 ## Intent
 

@@ -143,10 +143,12 @@ def save_upload(audio_root: Path, category: str, filename: str, stream: BinaryIO
         umask = os.umask(0)
         os.umask(umask)
         os.chmod(tmp.name, 0o666 & ~umask)
-        os.replace(tmp.name, target)
-    except BaseException:
+        # os.link (not os.replace) so the final step is itself the exclusivity
+        # check: if a same-name file appeared during the copy, this raises
+        # FileExistsError instead of overwriting it.
+        os.link(tmp.name, target)
+    finally:
         Path(tmp.name).unlink(missing_ok=True)
-        raise
     return target.relative_to(root).as_posix()
 
 

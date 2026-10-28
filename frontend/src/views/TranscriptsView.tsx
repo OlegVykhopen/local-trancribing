@@ -79,7 +79,14 @@ export function TranscriptsView() {
     await deleteTranscript(node.path)
     setSelected(null)
     setContent(null)
-    await loadTree()
+    // The delete succeeded; a refetch failure is a tree problem, not a delete
+    // error (and the viewer is already empty, so it couldn't show one).
+    try {
+      await loadTree()
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err)
+      setTreeError(`Deleted ${node.name}, but the list could not be refreshed (${reason}). Reload the page.`)
+    }
   }
 
   return (

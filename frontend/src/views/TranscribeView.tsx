@@ -34,6 +34,9 @@ export function TranscribeView() {
   const [tree, setTree] = useState<TreeNode[]>([])
   const [meta, setMeta] = useState<Meta | null>(null)
   const [categories, setCategories] = useState<string[]>([])
+  // Shown in the picker when a mutation succeeded but the tree refetch failed,
+  // so a done upload/delete is never reported as a failed one.
+  const [treeNotice, setTreeNotice] = useState<string | null>(null)
 
   const [selected, setSelected] = useState<TreeNode | null>(null)
   const [model, setModel] = useState('')
@@ -130,18 +133,29 @@ export function TranscribeView() {
   )
   useEvents(handleEvent)
 
+  async function refreshTree(doneMessage: string): Promise<TreeNode[] | null> {
+    try {
+      const files = await getFiles()
+      setTree(files)
+      setTreeNotice(null)
+      return files
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err)
+      setTreeNotice(`${doneMessage}, but the file list could not be refreshed (${reason}). Reload the page.`)
+      return null
+    }
+  }
+
   async function handleUpload(file: File, category: string) {
     const { path } = await uploadFile(file, category)
-    const files = await getFiles()
-    setTree(files)
-    setSelected(findFile(files, path))
+    const files = await refreshTree(`Uploaded ${file.name}`)
+    setSelected(files ? findFile(files, path) : null)
   }
 
   async function handleDeleteSource(node: TreeNode) {
     await deleteSourceFile(node.path)
-    const files = await getFiles()
-    setTree(files)
     setSelected(null)
+    await refreshTree(`Deleted ${node.name}`)
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -190,6 +204,7 @@ export function TranscribeView() {
         onSelect={setSelected}
         categories={categories}
         accept={(meta?.supported_extensions ?? []).join(',')}
+        notice={treeNotice}
         onUpload={handleUpload}
         onDelete={handleDeleteSource}
       />

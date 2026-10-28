@@ -105,6 +105,18 @@ describe('TranscriptsView', () => {
     expect(screen.getByText(/No transcripts yet/)).toBeInTheDocument()
   })
 
+  it('reports a failed tree refresh after a successful delete and still empties the viewer', async () => {
+    vi.mocked(deleteTranscript).mockResolvedValue(undefined)
+    vi.mocked(getTranscriptsTree).mockResolvedValueOnce(fixture).mockRejectedValueOnce(new Error('500 Internal Server Error'))
+    renderView('/transcripts?path=therapy/done.m4a.txt')
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete transcript' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+    expect(await screen.findByText(/Deleted done\.m4a\.txt, but the list could not be refreshed/)).toBeInTheDocument()
+    expect(screen.getByText(/Select a transcript/)).toBeInTheDocument()
+  })
+
   it('shows the API error when delete is refused and keeps the transcript', async () => {
     vi.mocked(deleteTranscript).mockRejectedValue(new Error('409 a job is writing this transcript'))
     renderView('/transcripts?path=therapy/done.m4a.txt')

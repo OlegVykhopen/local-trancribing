@@ -218,6 +218,18 @@ describe('TranscribeView', () => {
       expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument()
     })
 
+    it('reports a failed tree refresh after a successful upload as a refresh problem, not an upload error', async () => {
+      vi.mocked(uploadFile).mockResolvedValue({ path: 'podcast/ep2.mp3' })
+      vi.mocked(getFiles).mockResolvedValueOnce(tree).mockRejectedValueOnce(new Error('500 Internal Server Error'))
+      renderTranscribeView()
+
+      await userEvent.upload(await screen.findByTestId('upload-input'), new File(['x'], 'ep2.mp3'))
+      await userEvent.click(screen.getByRole('button', { name: 'Upload' }))
+
+      expect(await screen.findByText(/Uploaded ep2\.mp3, but the file list could not be refreshed/)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument()
+    })
+
     it('shows the upload error and keeps the row open', async () => {
       vi.mocked(uploadFile).mockRejectedValue(new Error('409 ep2.mp3 already exists in that category'))
       renderTranscribeView()
@@ -247,6 +259,19 @@ describe('TranscribeView', () => {
 
       await waitFor(() => expect(deleteSourceFile).toHaveBeenCalledWith('podcast/ep1.mp3'))
       await waitFor(() => expect(getFiles).toHaveBeenCalledTimes(2))
+      expect(screen.queryByText(/Selected:/)).not.toBeInTheDocument()
+    })
+
+    it('reports a failed tree refresh after a successful delete as a refresh problem', async () => {
+      vi.mocked(deleteSourceFile).mockResolvedValue(undefined)
+      vi.mocked(getFiles).mockResolvedValueOnce(tree).mockRejectedValueOnce(new Error('500 Internal Server Error'))
+      renderTranscribeView()
+      await selectEp1()
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete source file' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+      expect(await screen.findByText(/Deleted ep1\.mp3, but the file list could not be refreshed/)).toBeInTheDocument()
       expect(screen.queryByText(/Selected:/)).not.toBeInTheDocument()
     })
 
