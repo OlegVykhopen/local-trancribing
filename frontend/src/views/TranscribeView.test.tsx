@@ -38,6 +38,7 @@ const meta: Meta = {
     { code: 'en', name: 'english' },
     { code: 'uk', name: 'ukrainian' },
   ],
+  supported_extensions: ['.m4a', '.mp3'],
 }
 
 function LocationStateProbe() {

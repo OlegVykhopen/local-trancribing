@@ -12,12 +12,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(`${response.status} ${detail}`)
   }
+  if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
 
 export async function getFiles(): Promise<TreeNode[]> {
   const data = await request<{ tree: TreeNode[] }>('/api/files')
   return data.tree
+}
+
+export async function getTranscriptsTree(): Promise<TreeNode[]> {
+  const data = await request<{ tree: TreeNode[] }>('/api/transcripts')
+  return data.tree
+}
+
+// No Content-Type header: the browser sets multipart/form-data with the boundary.
+export async function uploadFile(file: File, category: string): Promise<{ path: string }> {
+  const body = new FormData()
+  body.append('file', file)
+  body.append('category', category)
+  return request<{ path: string }>('/api/files/upload', { method: 'POST', body })
+}
+
+export async function deleteSourceFile(path: string): Promise<void> {
+  return request<void>('/api/files?path=' + encodeURIComponent(path), { method: 'DELETE' })
+}
+
+export async function deleteTranscript(path: string): Promise<void> {
+  return request<void>('/api/transcripts?path=' + encodeURIComponent(path), { method: 'DELETE' })
 }
 
 export async function getCategories(): Promise<string[]> {

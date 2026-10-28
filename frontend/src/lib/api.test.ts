@@ -1,12 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createCategory, getCategories, getFiles, getMeta, getTranscript } from './api'
+import {
+  createCategory,
+  deleteSourceFile,
+  deleteTranscript,
+  getCategories,
+  getFiles,
+  getMeta,
+  getTranscript,
+  getTranscriptsTree,
+  uploadFile,
+} from './api'
 import type { TreeNode } from './types'
 
 function mockFetchOnce(body: unknown, init?: Partial<Response>) {
   const response = {
     ok: init?.ok ?? true,
     status: init?.status ?? 200,
-    json: () => Promise.resolve(body),
+    json: () =>
+      (init?.status ?? 200) === 204 ? Promise.reject(new Error('no body on 204')) : Promise.resolve(body),
   } as Response
   const fetchMock = vi.fn().mockResolvedValue(response)
   globalThis.fetch = fetchMock as unknown as typeof fetch
@@ -79,5 +90,36 @@ describe('api', () => {
     mockFetchOnce({ detail: 'bad path' }, { ok: false, status: 400 })
 
     await expect(getTranscript('../etc/passwd')).rejects.toThrow()
+  })
+
+  it('getTranscriptsTree() hits /api/transcripts and returns the tree array', async () => {
+    const fetchMock = mockFetchOnce({ tree: [] })
+
+    expect(await getTranscriptsTree()).toEqual([])
+    expect(fetchMock).toHaveBeenCalledWith('/api/transcripts')
+  })
+
+  it('uploadFile() posts multipart with file and category and no explicit headers', async () => {
+    const fetchMock = mockFetchOnce({ path: 'therapy/x.mp3' }, { status: 201 })
+    const file = new File(['x'], 'x.mp3', { type: 'audio/mpeg' })
+
+    expect(await uploadFile(file, 'therapy')).toEqual({ path: 'therapy/x.mp3' })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/files/upload')
+    expect(init.method).toBe('POST')
+    expect((init.body as FormData).get('category')).toBe('therapy')
+    expect((init.body as FormData).get('file')).toBe(file)
+    expect(init.headers).toBeUndefined()
+  })
+
+  it('deleteSourceFile() and deleteTranscript() send DELETE and resolve on 204', async () => {
+    let fetchMock = mockFetchOnce(undefined, { status: 204 })
+    await expect(deleteSourceFile('a/b.mp3')).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledWith('/api/files?path=a%2Fb.mp3', { method: 'DELETE' })
+
+    fetchMock = mockFetchOnce(undefined, { status: 204 })
+    await expect(deleteTranscript('a/b.mp3.txt')).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledWith('/api/transcripts?path=a%2Fb.mp3.txt', { method: 'DELETE' })
   })
 })

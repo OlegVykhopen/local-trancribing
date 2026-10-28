@@ -39,4 +39,5 @@ export interface Meta {
   default_model: string
   hf_token_present: boolean
   languages: LanguageOption[]
+  supported_extensions: string[]
 }
