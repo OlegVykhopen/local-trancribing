@@ -251,9 +251,9 @@ export function TranscribeView() {
               {jobs.map((job) => (
                 <div key={job.id} className="flex flex-col gap-1">
                   <JobCard job={job} />
-                  {job.status === 'done' && (
+                  {job.status === 'done' && typeof job.params?.path === 'string' && (
                     <a
-                      href="#/files"
+                      href={`#/transcripts?path=${encodeURIComponent(job.params.path + '.txt')}`}
                       className="self-end px-1 text-xs text-indigo-400 hover:text-indigo-300"
                     >
                       view transcript →

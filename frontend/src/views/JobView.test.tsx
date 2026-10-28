@@ -58,14 +58,14 @@ function makeJob(overrides: Partial<Job> = {}): Job {
   }
 }
 
-function TranscribeRouteProbe() {
-  const location = useLocation()
-  return <p>transcribe page, state: {JSON.stringify(location.state)}</p>
-}
-
 function FilesRouteProbe() {
   const location = useLocation()
-  return <p>files page, search: {location.search}</p>
+  return <p>files page, state: {JSON.stringify(location.state)}</p>
+}
+
+function TranscriptsRouteProbe() {
+  const location = useLocation()
+  return <p>transcripts page, search: {location.search}</p>
 }
 
 function renderJobView() {
@@ -73,8 +73,8 @@ function renderJobView() {
     <MemoryRouter initialEntries={['/job/1']}>
       <Routes>
         <Route path="/job/:id" element={<JobView />} />
-        <Route path="/transcribe" element={<TranscribeRouteProbe />} />
         <Route path="/files" element={<FilesRouteProbe />} />
+        <Route path="/transcripts" element={<TranscriptsRouteProbe />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -139,14 +139,14 @@ describe('JobView', () => {
     expect(await screen.findByText(/diarization was requested but unavailable/i)).toBeInTheDocument()
   })
 
-  it('offers Retry on a failed transcribe job and carries its params to the transcribe form', async () => {
+  it('offers Retry on a failed transcribe job and carries its params to the Files tab', async () => {
     const params = { path: 'podcast/ep1.mp3', model: 'medium', language: 'UK', diarize: false, num_speakers: null }
     vi.mocked(getJob).mockResolvedValue(makeJob({ status: 'error', error: 'boom', params }))
     renderJobView()
 
     await userEvent.click(await screen.findByRole('button', { name: 'Retry' }))
 
-    expect(await screen.findByText(/transcribe page/)).toBeInTheDocument()
+    expect(await screen.findByText(/files page/)).toBeInTheDocument()
     expect(screen.getByText(new RegExp('podcast/ep1\\.mp3'))).toBeInTheDocument()
   })
 
@@ -191,7 +191,7 @@ describe('JobView', () => {
     expect(screen.queryByTestId('progress-bar-indeterminate')).not.toBeInTheDocument()
   })
 
-  it('offers View transcript on a done transcribe job and deep-links to the file', async () => {
+  it('offers View transcript on a done transcribe job and deep-links to the transcript', async () => {
     vi.mocked(getJob).mockResolvedValue(
       makeJob({ status: 'done', progress: 100, result: { output_path: 'podcast/ep1.mp3.txt' } }),
     )
@@ -199,8 +199,8 @@ describe('JobView', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'View transcript' }))
 
-    expect(await screen.findByText(/files page/)).toBeInTheDocument()
-    expect(screen.getByText(/\?path=podcast%2Fep1\.mp3/)).toBeInTheDocument()
+    expect(await screen.findByText(/transcripts page/)).toBeInTheDocument()
+    expect(screen.getByText(/\?path=podcast%2Fep1\.mp3\.txt/)).toBeInTheDocument()
   })
 
   it('offers View transcript on a skipped job — the transcript already exists', async () => {

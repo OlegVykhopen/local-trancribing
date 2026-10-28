@@ -4,8 +4,8 @@ import { motion } from 'motion/react'
 
 const NAV_ITEMS = [
   { to: '/download', label: 'Download' },
-  { to: '/transcribe', label: 'Transcribe' },
   { to: '/files', label: 'Files' },
+  { to: '/transcripts', label: 'Transcripts' },
 ]
 
 export function Layout({ children }: { children: ReactNode }) {

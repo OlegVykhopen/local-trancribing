@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { FilesView } from './FilesView'
+import { TranscriptsView } from './TranscriptsView'
 import { getFiles, getTranscript } from '../lib/api'
 import type { TreeNode } from '../lib/types'
 
@@ -22,11 +22,11 @@ const fixture: TreeNode[] = [
   },
 ]
 
-function renderFilesView(initialEntry: string) {
+function renderTranscriptsView(initialEntry: string) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
-        <Route path="/files" element={<FilesView />} />
+        <Route path="/transcripts" element={<TranscriptsView />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -41,9 +41,9 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('FilesView deep link', () => {
+describe('TranscriptsView deep link', () => {
   it('selects the file from ?path=, expands its dir, and loads the transcript', async () => {
-    renderFilesView('/files?path=therapy/done.m4a')
+    renderTranscriptsView('/transcripts?path=therapy/done.m4a')
 
     // Dir auto-expanded so the selected row is visible.
     expect(await screen.findByText('done.m4a')).toBeInTheDocument()
@@ -52,7 +52,7 @@ describe('FilesView deep link', () => {
   })
 
   it('does not select anything without a ?path param', async () => {
-    renderFilesView('/files')
+    renderTranscriptsView('/transcripts')
 
     expect(await screen.findByText('therapy')).toBeInTheDocument()
     // Dir stays collapsed, nothing fetched.
@@ -61,7 +61,7 @@ describe('FilesView deep link', () => {
   })
 
   it('ignores a ?path that no longer exists in the tree', async () => {
-    renderFilesView('/files?path=therapy/deleted.m4a')
+    renderTranscriptsView('/transcripts?path=therapy/deleted.m4a')
 
     expect(await screen.findByText('therapy')).toBeInTheDocument()
     expect(getTranscript).not.toHaveBeenCalled()

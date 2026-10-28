@@ -154,7 +154,7 @@ export function JobView() {
             {canRetry && (
               <Button
                 variant="outline"
-                onClick={() => navigate('/transcribe', { state: { retry: job.params } })}
+                onClick={() => navigate('/files', { state: { retry: job.params } })}
               >
                 Retry
               </Button>
@@ -162,7 +162,7 @@ export function JobView() {
             {canViewTranscript && (
               <Button
                 variant="outline"
-                onClick={() => navigate(`/files?path=${encodeURIComponent(audioPath!)}`)}
+                onClick={() => navigate(`/transcripts?path=${encodeURIComponent(audioPath! + '.txt')}`)}
               >
                 View transcript
               </Button>

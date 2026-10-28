@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { TranscribeView } from './TranscribeView'
 import { resetEventsForTests } from '../lib/useEvents'
 import { createTranscribeJob, getFiles, getJobs, getMeta } from '../lib/api'
+import type { Job } from '../lib/types'
 import type { Meta, TreeNode } from '../lib/types'
 
 vi.mock('../lib/api', () => ({
@@ -46,12 +47,12 @@ function LocationStateProbe() {
   return <p data-testid="location-state">{JSON.stringify(location.state ?? null)}</p>
 }
 
-function renderTranscribeView(initialEntry: unknown = '/transcribe') {
+function renderTranscribeView(initialEntry: unknown = '/files') {
   return render(
     <MemoryRouter initialEntries={[initialEntry as string]}>
       <LocationStateProbe />
       <Routes>
-        <Route path="/transcribe" element={<TranscribeView />} />
+        <Route path="/files" element={<TranscribeView />} />
         <Route path="/job/:id" element={<p>job page</p>} />
       </Routes>
     </MemoryRouter>,
@@ -59,7 +60,7 @@ function renderTranscribeView(initialEntry: unknown = '/transcribe') {
 }
 
 function renderWithRetry(retry: Record<string, unknown>) {
-  return renderTranscribeView({ pathname: '/transcribe', state: { retry } })
+  return renderTranscribeView({ pathname: '/files', state: { retry } })
 }
 
 beforeEach(() => {
@@ -91,7 +92,7 @@ describe('TranscribeView', () => {
 
   it('prefills the form from retry state so the failed job can be resubmitted', async () => {
     renderTranscribeView({
-      pathname: '/transcribe',
+      pathname: '/files',
       state: {
         retry: { path: 'podcast/ep1.mp3', model: 'medium', language: 'UK', diarize: true, num_speakers: 2 },
       },
@@ -164,5 +165,27 @@ describe('TranscribeView', () => {
     const language = (await screen.findByLabelText('Language')) as HTMLSelectElement
     await waitFor(() => expect(language.value).toBe('uk'))
     await waitFor(() => expect(screen.getByTestId('location-state').textContent).toBe('null'))
+  })
+
+  it('links a done job in history to its transcript on the Transcripts tab', async () => {
+    const done: Job = {
+      id: 7,
+      kind: 'transcribe',
+      status: 'done',
+      params: { path: 'podcast/ep1.mp3', model: 'base' },
+      category: 'podcast',
+      progress: 100,
+      stage: null,
+      result: { output_path: 'podcast/ep1.mp3.txt' },
+      error: null,
+      created_at: '2026-10-28T10:00:00',
+      started_at: null,
+      finished_at: null,
+    }
+    vi.mocked(getJobs).mockResolvedValue([done])
+    renderTranscribeView()
+
+    const link = await screen.findByRole('link', { name: /view transcript/ })
+    expect(link).toHaveAttribute('href', '#/transcripts?path=podcast%2Fep1.mp3.txt')
   })
 })
