@@ -5,7 +5,7 @@
 Two ways to transcribe audio locally with WhisperX, with optional speaker diarization (who said what). Everything runs on-device — no cloud APIs, no costs.
 
 1. **CLI**: `transcribe.py` — batch-transcribe audio files from the terminal.
-2. **Transcribing Studio** (web app): FastAPI backend + React frontend on `127.0.0.1:8756` — download YouTube audio (yt-dlp), transcribe with a form instead of CLI flags, watch live progress over SSE, browse sources/transcripts by category.
+2. **Transcribing Studio** (web app): FastAPI backend + React frontend on `127.0.0.1:8756`. Three tabs: **Download** (YouTube audio via yt-dlp into a category), **Files** (browse `audio_sources/`, upload or delete source audio, transcribe with a form, watch live progress over SSE), **Transcripts** (browse `transcripts/`, read, copy to clipboard, delete).
 
 ## How transcription works
 
@@ -20,7 +20,7 @@ Output format: `[HH:MM:SS - HH:MM:SS] SPEAKER_XX: transcribed text`
 
 - `transcribe.py` — CLI tool; also imported by the web app for its model-loading/transcription functions
 - `app/` — FastAPI backend: `main.py` (routes, SSE, static mount), `worker.py` (single worker thread + job queue, cooperative cancellation), `db.py` (SQLite job store, WAL), `events.py` (thread-safe event bus → SSE), `schemas.py` (Pydantic models incl. `JobStatus`/`JobResponse`), `services/` (downloader, transcriber with warm model cache, file browser)
-- `frontend/` — React + TypeScript + Vite + Tailwind; `npm run build` produces `frontend/dist`, which the backend serves
+- `frontend/` — React + TypeScript + Vite + Tailwind + lucide-react icons; `npm run build` produces `frontend/dist`, which the backend serves. Views: `TranscribeView` (the Files tab, route `/files`), `TranscriptsView` (route `/transcripts`), `DownloadView`, `JobView`
 - `tests/` — backend pytest suite; frontend tests are vitest (`frontend/src/**/*.test.*`)
 - `run.sh` — launcher: sets `DYLD_LIBRARY_PATH`, starts uvicorn on port 8756, auto-opens the browser (`NO_BROWSER=1` to skip)
 - `audio_sources/` / `transcripts/` — input/output roots (gitignored; created at app startup)
@@ -35,7 +35,7 @@ Output format: `[HH:MM:SS - HH:MM:SS] SPEAKER_XX: transcribed text`
 - **Device**: Runs on CPU with `int8` compute type (even on Apple Silicon Macs — WhisperX diarization works best on CPU)
 - **Supported formats**: mp3, wav, m4a, flac, ogg, wma, aac, webm, mp4
 - **Models**: Whisper model sizes from `tiny` to `large-v3` (default: `base`)
-- **Dependencies**: whisperx, torch, pyannote (via whisperx), python-dotenv, fastapi, uvicorn, sse-starlette, yt-dlp, pydantic (see `requirements.txt`)
+- **Dependencies**: whisperx, torch, pyannote (via whisperx), python-dotenv, fastapi, python-multipart (file upload), uvicorn, sse-starlette, yt-dlp, pydantic (see `requirements.txt`)
 - **ffmpeg, two distinct roles**: torchcodec needs the ffmpeg@7 *libraries* (`DYLD_LIBRARY_PATH=/opt/homebrew/opt/ffmpeg@7/lib`, set by `run.sh` and `transcribe.py`); yt-dlp needs an ffmpeg *binary* (`/opt/homebrew/bin/ffmpeg`, set in `app/config.py`). Don't "unify" them.
 
 ## Usage
@@ -69,3 +69,6 @@ cd frontend && npx tsc -b              # typecheck
 - Speaker diarization is optional — works without `HF_TOKEN` but won't separate speakers; when requested but unavailable, the job result carries `diarized: false`
 - Job statuses: `queued → running → done | error`, plus `cancelling → cancelled` (see `JobStatus` in `app/schemas.py`, mirrored in `frontend/src/lib/types.ts`)
 - Jobs orphaned by a server restart are marked `error: "interrupted by restart"` on next startup
+- File management endpoints (all path-checked against their root): `POST /api/files/upload` (multipart `file` + `category`; 409 on a same-name file, never overwrites), `DELETE /api/files?path=`, `GET /api/transcripts` (tree of `transcripts/`, `.txt` only), `DELETE /api/transcripts?path=`
+- Delete guards: a source file can't be deleted while a transcribe job for it is queued/running/cancelling (409); a transcript can't be deleted while its job is running/cancelling (the worker rewrites it at the end), but a merely queued job doesn't block — deleting the transcript first is how you force a re-transcribe
+- The Transcripts tab reads `transcripts/` directly, so a transcript stays visible after its source audio is deleted. Deep link: `/transcripts?path=<rel .txt path>`

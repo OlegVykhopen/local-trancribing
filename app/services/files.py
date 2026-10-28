@@ -139,6 +139,10 @@ def save_upload(audio_root: Path, category: str, filename: str, stream: BinaryIO
     try:
         with tmp:
             shutil.copyfileobj(stream, tmp)
+        # NamedTemporaryFile creates 0600; match what a plain open(..., "wb") gives.
+        umask = os.umask(0)
+        os.umask(umask)
+        os.chmod(tmp.name, 0o666 & ~umask)
         os.replace(tmp.name, target)
     except BaseException:
         Path(tmp.name).unlink(missing_ok=True)

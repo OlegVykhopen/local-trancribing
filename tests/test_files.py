@@ -1,4 +1,5 @@
 import io
+import os
 
 import pytest
 
@@ -226,3 +227,12 @@ def test_delete_transcript_rejects_non_txt(roots):
         files.delete_transcript(transcripts_root, "therapy/x.json")
     with pytest.raises(FileNotFoundError):
         files.delete_transcript(transcripts_root, "therapy/missing.txt")
+
+
+def test_save_upload_file_mode_respects_umask(roots):
+    audio_root, _ = roots
+    files.save_upload(audio_root, "therapy", "perm.mp3", io.BytesIO(b"x"))
+    mode = (audio_root / "therapy" / "perm.mp3").stat().st_mode & 0o777
+    umask = os.umask(0)
+    os.umask(umask)
+    assert mode == 0o666 & ~umask  # same as a regular open(..., "wb"), not tempfile's 0600
