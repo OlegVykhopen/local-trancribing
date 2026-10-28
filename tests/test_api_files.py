@@ -129,3 +129,16 @@ def test_startup_marks_interrupted_jobs(roots):
     job = db_module.get_job(conn, job_id)
     conn.close()
     assert job["status"] == "error"
+
+
+def test_transcripts_endpoint_shape(client):
+    body = client.get("/api/transcripts").json()
+    therapy = next(n for n in body["tree"] if n["name"] == "therapy")
+    child = therapy["children"][0]
+    assert child["path"] == "therapy/a.m4a.txt"
+    assert "transcribed" not in child
+
+
+def test_meta_exposes_supported_extensions(client):
+    exts = client.get("/api/meta").json()["supported_extensions"]
+    assert ".m4a" in exts and ".mp3" in exts and exts == sorted(exts)

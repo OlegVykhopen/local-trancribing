@@ -32,6 +32,7 @@ from app.services import files as files_service
 from app.services.downloader import run_download
 from app.services.transcriber import ModelCache, run_transcribe
 from app.worker import Worker
+from transcribe import SUPPORTED_EXTENSIONS
 
 dotenv.load_dotenv()
 
@@ -76,6 +77,11 @@ def create_app(
         tree = files_service.list_tree(audio_root, transcripts_root)
         return FilesResponse(tree=tree)
 
+    @app.get("/api/transcripts", response_model=FilesResponse, response_model_exclude_none=True)
+    def get_transcripts() -> FilesResponse:
+        tree = files_service.list_transcripts_tree(transcripts_root)
+        return FilesResponse(tree=tree)
+
     @app.get("/api/categories", response_model=CategoriesResponse)
     def get_categories() -> CategoriesResponse:
         return CategoriesResponse(categories=files_service.list_categories(audio_root))
@@ -105,6 +111,7 @@ def create_app(
             models=config.WHISPER_MODELS,
             default_model="base",
             hf_token_present=bool(os.environ.get("HF_TOKEN")),
+            supported_extensions=sorted(SUPPORTED_EXTENSIONS),
             languages=[
                 LanguageOption(code=code, name=name)
                 for code, name in sorted(WHISPER_LANGUAGES.items(), key=lambda item: item[1])

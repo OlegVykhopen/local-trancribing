@@ -55,6 +55,7 @@ class MetaResponse(BaseModel):
     default_model: str
     hf_token_present: bool
     languages: list[LanguageOption]
+    supported_extensions: list[str]
 
 
 class DownloadJobRequest(BaseModel):

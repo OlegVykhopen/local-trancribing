@@ -59,6 +59,37 @@ def list_tree(audio_root: Path, transcripts_root: Path) -> list[dict]:
     return _build_tree(audio_root, audio_root, transcripts_root)
 
 
+def _build_transcripts_tree(directory: Path, transcripts_root: Path) -> list[dict]:
+    entries = list(directory.iterdir())
+    dirs = sorted((e for e in entries if e.is_dir()), key=lambda p: p.name)
+    txt_files = sorted(
+        (e for e in entries if e.is_file() and e.suffix.lower() == ".txt"),
+        key=lambda p: p.name,
+    )
+    nodes: list[dict] = []
+    for d in dirs:
+        nodes.append(
+            {
+                "name": d.name,
+                "path": d.relative_to(transcripts_root).as_posix(),
+                "type": "dir",
+                "children": _build_transcripts_tree(d, transcripts_root),
+            }
+        )
+    for f in txt_files:
+        nodes.append({"name": f.name, "path": f.relative_to(transcripts_root).as_posix(), "type": "file"})
+    return nodes
+
+
+def list_transcripts_tree(transcripts_root: Path) -> list[dict]:
+    """Recursively list transcripts_root as a tree of dir/file nodes.
+
+    Same shape as list_tree but without the `transcribed` flag; only `.txt`
+    files are included (stray .DS_Store / .json files are ignored).
+    """
+    return _build_transcripts_tree(transcripts_root, transcripts_root)
+
+
 def list_categories(audio_root: Path) -> list[str]:
     """Return the sorted names of top-level directories under audio_root."""
     return sorted(p.name for p in audio_root.iterdir() if p.is_dir())

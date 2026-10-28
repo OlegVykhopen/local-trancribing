@@ -129,3 +129,35 @@ def test_read_transcript_cyrillic_filename(roots):
     content = files.read_transcript(transcripts_root, "терапия/сеанс.m4a.txt")
 
     assert content == "привет мир"
+
+
+def test_transcripts_tree_lists_txt_only(roots):
+    _, transcripts_root = roots
+    (transcripts_root / ".DS_Store").write_bytes(b"")
+    (transcripts_root / "therapy" / "notes.json").write_text("{}")
+    tree = files.list_transcripts_tree(transcripts_root)
+    assert tree == [
+        {
+            "name": "consulting",
+            "path": "consulting",
+            "type": "dir",
+            "children": [
+                {
+                    "name": "marketing",
+                    "path": "consulting/marketing",
+                    "type": "dir",
+                    "children": [
+                        {"name": "b.mp3.txt", "path": "consulting/marketing/b.mp3.txt", "type": "file"},
+                    ],
+                },
+            ],
+        },
+        {
+            "name": "therapy",
+            "path": "therapy",
+            "type": "dir",
+            "children": [
+                {"name": "a.m4a.txt", "path": "therapy/a.m4a.txt", "type": "file"},
+            ],
+        },
+    ]
