@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import dotenv
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -87,6 +87,44 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         return {"path": rel_path}
+
+    def _active_transcribe_jobs() -> list[dict]:
+        conn = db.connect(db_path)
+        try:
+            return db.list_active_transcribe_jobs(conn)
+        finally:
+            conn.close()
+
+    @app.delete("/api/files", status_code=204)
+    def delete_source(path: str) -> Response:
+        if any(job["params"].get("path") == path for job in _active_transcribe_jobs()):
+            raise HTTPException(status_code=409, detail="a job is using this file")
+        try:
+            files_service.delete_source_file(audio_root, path)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return Response(status_code=204)
+
+    @app.delete("/api/transcripts", status_code=204)
+    def delete_transcript_route(path: str) -> Response:
+        # Only a *running* job rewrites the transcript at its end; a queued one
+        # would merely be skipped, and deleting first is how a re-transcribe
+        # is forced (the Job view says so).
+        audio_path = path[:-4] if path.endswith(".txt") else path
+        if any(
+            job["status"] in ("running", "cancelling") and job["params"].get("path") == audio_path
+            for job in _active_transcribe_jobs()
+        ):
+            raise HTTPException(status_code=409, detail="a job is writing this transcript")
+        try:
+            files_service.delete_transcript(transcripts_root, path)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return Response(status_code=204)
 
     @app.get("/api/transcripts", response_model=FilesResponse, response_model_exclude_none=True)
     def get_transcripts() -> FilesResponse:

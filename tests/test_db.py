@@ -47,3 +47,15 @@ def test_list_jobs_filters_by_kind_newest_first(conn):
 
     all_jobs = db.list_jobs(conn)
     assert [job["id"] for job in all_jobs] == [d2, t1, d1]
+
+
+def test_list_active_transcribe_jobs(conn):
+    a = db.create_job(conn, "transcribe", {"path": "x.mp3"})
+    b = db.create_job(conn, "transcribe", {"path": "y.mp3"})
+    db.set_status(conn, b, "done")
+    c = db.create_job(conn, "transcribe", {"path": "z.mp3"})
+    db.set_status(conn, c, "running")
+    db.create_job(conn, "download", {"url": "u"})
+    active = db.list_active_transcribe_jobs(conn)
+    assert [j["id"] for j in active] == [a, c]
+    assert active[1]["params"] == {"path": "z.mp3"} and active[1]["status"] == "running"

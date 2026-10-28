@@ -94,6 +94,22 @@ def list_jobs(conn: sqlite3.Connection, kind: str | None = None, limit: int = 10
     return [_row_to_job(row) for row in rows]
 
 
+ACTIVE_STATUSES = ("queued", "running", "cancelling")
+
+
+def list_active_transcribe_jobs(conn: sqlite3.Connection) -> list[dict]:
+    """Transcribe jobs that are queued, running, or cancelling, oldest first.
+
+    Used by the delete endpoints to refuse removing a file a job still needs.
+    """
+    placeholders = ",".join("?" for _ in ACTIVE_STATUSES)
+    rows = conn.execute(
+        f"SELECT * FROM jobs WHERE kind = 'transcribe' AND status IN ({placeholders}) ORDER BY id",
+        ACTIVE_STATUSES,
+    ).fetchall()
+    return [_row_to_job(row) for row in rows]
+
+
 def set_status(
     conn: sqlite3.Connection,
     job_id: int,

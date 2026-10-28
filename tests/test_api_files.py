@@ -1,3 +1,6 @@
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -26,6 +29,32 @@ def roots(tmp_path):
     db_path = tmp_path / "app.db"
 
     return audio_root, transcripts_root, db_path
+
+
+def wait_until(predicate, timeout=2.0, interval=0.01):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
+
+
+@pytest.fixture
+def blocking_client(roots):
+    """Client whose transcribe handler blocks until the returned Event is set."""
+    audio_root, transcripts_root, db_path = roots
+    app = create_app(audio_root, transcripts_root, db_path)
+    release = threading.Event()
+
+    def blocking_handler(job, ctx):
+        release.wait(timeout=5)
+        return {"output_path": job["params"]["path"] + ".txt"}
+
+    with TestClient(app) as test_client:
+        app.state.worker.register("transcribe", blocking_handler)
+        yield test_client, release
+        release.set()
 
 
 @pytest.fixture
@@ -173,3 +202,56 @@ def test_upload_bad_extension_is_400(client):
         data={"category": ""},
     )
     assert resp.status_code == 400
+
+
+def test_delete_source_file_204_and_404(client, roots):
+    audio_root, _, _ = roots
+    assert client.delete("/api/files", params={"path": "c.mp3"}).status_code == 204
+    assert not (audio_root / "c.mp3").exists()
+    assert client.delete("/api/files", params={"path": "c.mp3"}).status_code == 404
+    assert client.delete("/api/files", params={"path": "../.env"}).status_code == 400
+
+
+def test_delete_transcript_204_and_404(client, roots):
+    _, transcripts_root, _ = roots
+    assert client.delete("/api/transcripts", params={"path": "therapy/a.m4a.txt"}).status_code == 204
+    assert not (transcripts_root / "therapy" / "a.m4a.txt").exists()
+    assert client.delete("/api/transcripts", params={"path": "therapy/a.m4a.txt"}).status_code == 404
+
+
+def _submit(client, path):
+    resp = client.post("/api/jobs/transcribe", json={"path": path, "model": "tiny", "diarize": False})
+    assert resp.status_code == 202
+    return resp.json()["job_id"]
+
+
+def _status(client, job_id):
+    return client.get(f"/api/jobs/{job_id}").json()["status"]
+
+
+def test_delete_source_refused_while_job_queued_or_running(blocking_client):
+    client, release = blocking_client
+    first = _submit(client, "therapy/a.m4a")
+    second = _submit(client, "c.mp3")
+    assert wait_until(lambda: _status(client, first) == "running")
+
+    resp = client.delete("/api/files", params={"path": "therapy/a.m4a"})
+    assert resp.status_code == 409 and "a job is using this file" in resp.json()["detail"]
+    assert client.delete("/api/files", params={"path": "c.mp3"}).status_code == 409  # queued
+    # transcript delete: refused while its job is running
+    resp = client.delete("/api/transcripts", params={"path": "therapy/a.m4a.txt"})
+    assert resp.status_code == 409 and "a job is writing this transcript" in resp.json()["detail"]
+
+    release.set()
+    assert wait_until(lambda: _status(client, second) == "done")
+    assert client.delete("/api/files", params={"path": "c.mp3"}).status_code == 204
+
+
+def test_delete_transcript_allowed_while_job_only_queued(blocking_client):
+    client, release = blocking_client
+    blocker = _submit(client, "c.mp3")  # runs and blocks the worker
+    queued = _submit(client, "therapy/a.m4a")
+    assert wait_until(lambda: _status(client, blocker) == "running")
+    assert _status(client, queued) == "queued"
+    assert client.delete("/api/transcripts", params={"path": "therapy/a.m4a.txt"}).status_code == 204
+    release.set()

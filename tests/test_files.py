@@ -195,3 +195,34 @@ def test_save_upload_duplicate_is_file_exists(roots):
     with pytest.raises(FileExistsError):
         files.save_upload(audio_root, "therapy", "a.m4a", io.BytesIO(b"new"))
     assert (audio_root / "therapy" / "a.m4a").read_bytes() == b""
+
+
+def test_delete_source_file_leaves_transcript(roots):
+    audio_root, transcripts_root = roots
+    files.delete_source_file(audio_root, "therapy/a.m4a")
+    assert not (audio_root / "therapy" / "a.m4a").exists()
+    assert (transcripts_root / "therapy" / "a.m4a.txt").exists()
+    assert files.list_transcripts_tree(transcripts_root)[1]["children"][0]["name"] == "a.m4a.txt"
+
+
+def test_delete_transcript_leaves_audio(roots):
+    audio_root, transcripts_root = roots
+    files.delete_transcript(transcripts_root, "therapy/a.m4a.txt")
+    assert not (transcripts_root / "therapy" / "a.m4a.txt").exists()
+    assert (audio_root / "therapy" / "a.m4a").exists()
+
+
+@pytest.mark.parametrize("rel", ["../x", "therapy", "a.m4a.txt"])
+def test_delete_source_file_rejects(roots, rel):
+    audio_root, _ = roots
+    with pytest.raises((ValueError, FileNotFoundError)):
+        files.delete_source_file(audio_root, rel)
+
+
+def test_delete_transcript_rejects_non_txt(roots):
+    _, transcripts_root = roots
+    (transcripts_root / "therapy" / "x.json").write_text("{}")
+    with pytest.raises(ValueError):
+        files.delete_transcript(transcripts_root, "therapy/x.json")
+    with pytest.raises(FileNotFoundError):
+        files.delete_transcript(transcripts_root, "therapy/missing.txt")

@@ -146,6 +146,42 @@ def save_upload(audio_root: Path, category: str, filename: str, stream: BinaryIO
     return target.relative_to(root).as_posix()
 
 
+def _resolve_for_delete(root: Path, rel_path: str, what: str) -> Path:
+    resolved_root = root.resolve()
+    candidate = (root / rel_path).resolve()
+    if not candidate.is_relative_to(resolved_root) or candidate == resolved_root:
+        raise ValueError(f"path escapes {what} root: {rel_path!r}")
+    if candidate.is_dir():
+        raise ValueError(f"not a file: {rel_path!r}")
+    if not candidate.is_file():
+        raise FileNotFoundError(f"{what} not found: {rel_path!r}")
+    return candidate
+
+
+def delete_source_file(audio_root: Path, rel_path: str) -> None:
+    """Delete one audio file under audio_root. Never touches transcripts.
+
+    Raises ValueError if the path escapes the root, is a directory, or isn't a
+    supported audio file; FileNotFoundError if nothing exists there.
+    """
+    target = _resolve_for_delete(audio_root, rel_path, "source file")
+    if target.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise ValueError(f"not an audio file: {rel_path!r}")
+    target.unlink()
+
+
+def delete_transcript(transcripts_root: Path, rel_path: str) -> None:
+    """Delete one .txt transcript under transcripts_root. Never touches audio.
+
+    Raises ValueError if the path escapes the root, is a directory, or isn't a
+    .txt file; FileNotFoundError if nothing exists there.
+    """
+    target = _resolve_for_delete(transcripts_root, rel_path, "transcript")
+    if target.suffix.lower() != ".txt":
+        raise ValueError(f"not a transcript: {rel_path!r}")
+    target.unlink()
+
+
 def read_transcript(transcripts_root: Path, rel_path: str) -> str:
     """Read a transcript file's text content, given a path relative to transcripts_root.
 
