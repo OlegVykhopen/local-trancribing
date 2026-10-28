@@ -102,22 +102,28 @@ function TreeRow({ node, onSelectFile, selectedPath, depth, fileClassName, rende
 
   const isSelected = selectedPath === node.path
 
+  // The row is a div with the name as its own button so a badge can be a
+  // link (an <a> inside a <button> is invalid HTML).
   return (
     <li>
-      <button
-        type="button"
+      <div
         data-testid="file-row"
-        onClick={() => onSelectFile(node)}
         style={indent}
         className={cn(
-          'flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left hover:bg-zinc-800',
+          'flex w-full items-center justify-between gap-2 rounded px-2 py-1 hover:bg-zinc-800',
           fileClassName(node),
           isSelected && 'bg-indigo-500/15 text-indigo-300',
         )}
       >
-        <span className="truncate">{node.name}</span>
+        <button
+          type="button"
+          onClick={() => onSelectFile(node)}
+          className="min-w-0 flex-1 truncate text-left"
+        >
+          {node.name}
+        </button>
         {renderFileBadge(node)}
-      </button>
+      </div>
     </li>
   )
 }

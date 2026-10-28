@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import type { TreeNode } from '../lib/types'
 import { Card } from './ui/Card'
 import { ScrollArea } from './ui/ScrollArea'
@@ -8,6 +9,11 @@ interface FilePickerProps {
   nodes: TreeNode[]
   selectedPath?: string
   onSelect: (node: TreeNode) => void
+  // Upload / delete controls (wired in the Files tab; see TranscribeView).
+  categories?: string[]
+  accept?: string
+  onUpload?: (file: File, category: string) => Promise<void>
+  onDelete?: (node: TreeNode) => Promise<void>
 }
 
 // A files tree tuned for picking a source to transcribe: untranscribed
@@ -17,7 +23,8 @@ interface FilePickerProps {
 // transcript and reports the job result as "skipped". Reuses
 // FileTree's recursive renderer (open/close state, indent, dir/file
 // branching) via its fileClassName/renderFileBadge hooks instead of
-// forking the tree.
+// forking the tree. A transcribed file's badge links to its transcript on
+// the Transcripts tab instead of selecting the file.
 export function FilePicker({ nodes, selectedPath, onSelect }: FilePickerProps) {
   return (
     <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -32,9 +39,14 @@ export function FilePicker({ nodes, selectedPath, onSelect }: FilePickerProps) {
           fileClassName={(node) => (node.transcribed ? 'text-zinc-500' : 'text-zinc-200')}
           renderFileBadge={(node) =>
             node.transcribed ? (
-              <Badge data-testid="transcribed-badge" className="shrink-0">
-                already transcribed
-              </Badge>
+              <Link
+                to={`/transcripts?path=${encodeURIComponent(node.path + '.txt')}`}
+                data-testid="transcribed-badge"
+                title="Open transcript"
+                className="shrink-0"
+              >
+                <Badge className="hover:underline">already transcribed</Badge>
+              </Link>
             ) : null
           }
         />
