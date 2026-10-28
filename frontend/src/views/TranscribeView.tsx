@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence } from 'motion/react'
-import { createTranscribeJob, getFiles, getJobs, getMeta } from '../lib/api'
+import { createTranscribeJob, deleteSourceFile, getCategories, getFiles, getJobs, getMeta, uploadFile } from '../lib/api'
 import { useEvents } from '../lib/useEvents'
 import type { AppEvent, Job, JobStatus, Meta, TreeNode } from '../lib/types'
 import { Button } from '../components/ui/Button'
@@ -33,6 +33,7 @@ export function TranscribeView() {
 
   const [tree, setTree] = useState<TreeNode[]>([])
   const [meta, setMeta] = useState<Meta | null>(null)
+  const [categories, setCategories] = useState<string[]>([])
 
   const [selected, setSelected] = useState<TreeNode | null>(null)
   const [model, setModel] = useState('')
@@ -52,11 +53,12 @@ export function TranscribeView() {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([getFiles(), getMeta()])
-      .then(([files, m]) => {
+    Promise.all([getFiles(), getMeta(), getCategories()])
+      .then(([files, m, cats]) => {
         if (cancelled) return
         setTree(files)
         setMeta(m)
+        setCategories(cats)
         const notices: string[] = []
         const retryModel = typeof retry?.model === 'string' ? retry.model : null
         if (retryModel && !m.models.includes(retryModel)) {
@@ -128,6 +130,20 @@ export function TranscribeView() {
   )
   useEvents(handleEvent)
 
+  async function handleUpload(file: File, category: string) {
+    const { path } = await uploadFile(file, category)
+    const files = await getFiles()
+    setTree(files)
+    setSelected(findFile(files, path))
+  }
+
+  async function handleDeleteSource(node: TreeNode) {
+    await deleteSourceFile(node.path)
+    const files = await getFiles()
+    setTree(files)
+    setSelected(null)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitError(null)
@@ -168,7 +184,15 @@ export function TranscribeView() {
 
   return (
     <div className="flex h-full min-h-0 gap-4 p-4">
-      <FilePicker nodes={tree} selectedPath={selected?.path} onSelect={setSelected} />
+      <FilePicker
+        nodes={tree}
+        selectedPath={selected?.path}
+        onSelect={setSelected}
+        categories={categories}
+        accept={(meta?.supported_extensions ?? []).join(',')}
+        onUpload={handleUpload}
+        onDelete={handleDeleteSource}
+      />
 
       <Card className="flex w-96 shrink-0 flex-col gap-4 p-4">
         <h2 className="text-sm font-medium text-zinc-100">Transcribe</h2>

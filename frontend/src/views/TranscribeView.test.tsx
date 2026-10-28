@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { TranscribeView } from './TranscribeView'
 import { resetEventsForTests } from '../lib/useEvents'
-import { createTranscribeJob, getFiles, getJobs, getMeta } from '../lib/api'
+import { createTranscribeJob, deleteSourceFile, getCategories, getFiles, getJobs, getMeta, uploadFile } from '../lib/api'
 import type { Job } from '../lib/types'
 import type { Meta, TreeNode } from '../lib/types'
 
@@ -12,7 +12,10 @@ vi.mock('../lib/api', () => ({
   getFiles: vi.fn(),
   getMeta: vi.fn(),
   getJobs: vi.fn(),
+  getCategories: vi.fn(),
   createTranscribeJob: vi.fn(),
+  uploadFile: vi.fn(),
+  deleteSourceFile: vi.fn(),
 }))
 
 class FakeEventSource {
@@ -68,6 +71,7 @@ beforeEach(() => {
   vi.mocked(getFiles).mockResolvedValue(tree)
   vi.mocked(getMeta).mockResolvedValue(meta)
   vi.mocked(getJobs).mockResolvedValue([])
+  vi.mocked(getCategories).mockResolvedValue(['podcast'])
 })
 
 afterEach(() => {
@@ -187,5 +191,75 @@ describe('TranscribeView', () => {
 
     const link = await screen.findByRole('link', { name: /view transcript/ })
     expect(link).toHaveAttribute('href', '#/transcripts?path=podcast%2Fep1.mp3.txt')
+  })
+
+  describe('upload', () => {
+    it('uploads a chosen file into the chosen category and selects it', async () => {
+      const file = new File(['x'], 'ep2.mp3', { type: 'audio/mpeg' })
+      vi.mocked(uploadFile).mockResolvedValue({ path: 'podcast/ep2.mp3' })
+      vi.mocked(getFiles)
+        .mockResolvedValueOnce(tree)
+        .mockResolvedValueOnce([
+          {
+            ...tree[0],
+            children: [...tree[0].children!, { name: 'ep2.mp3', path: 'podcast/ep2.mp3', type: 'file' }],
+          },
+        ])
+      renderTranscribeView()
+
+      const input = (await screen.findByTestId('upload-input')) as HTMLInputElement
+      expect(input).toHaveAttribute('accept', '.m4a,.mp3')
+      await userEvent.upload(input, file)
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'podcast')
+      await userEvent.click(screen.getByRole('button', { name: 'Upload' }))
+
+      await waitFor(() => expect(uploadFile).toHaveBeenCalledWith(file, 'podcast'))
+      expect(await screen.findByText(/Selected:/)).toHaveTextContent('podcast/ep2.mp3')
+      expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument()
+    })
+
+    it('shows the upload error and keeps the row open', async () => {
+      vi.mocked(uploadFile).mockRejectedValue(new Error('409 ep2.mp3 already exists in that category'))
+      renderTranscribeView()
+
+      await userEvent.upload(await screen.findByTestId('upload-input'), new File(['x'], 'ep2.mp3'))
+      await userEvent.click(screen.getByRole('button', { name: 'Upload' }))
+
+      expect(await screen.findByText(/already exists in that category/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument()
+    })
+  })
+
+  describe('delete source', () => {
+    async function selectEp1() {
+      await userEvent.click(await screen.findByText('podcast'))
+      await userEvent.click(screen.getByText('ep1.mp3'))
+      expect(screen.getByText(/Selected:/)).toHaveTextContent('podcast/ep1.mp3')
+    }
+
+    it('deletes the selected source after confirm and clears the selection', async () => {
+      vi.mocked(deleteSourceFile).mockResolvedValue(undefined)
+      renderTranscribeView()
+      await selectEp1()
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete source file' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+      await waitFor(() => expect(deleteSourceFile).toHaveBeenCalledWith('podcast/ep1.mp3'))
+      await waitFor(() => expect(getFiles).toHaveBeenCalledTimes(2))
+      expect(screen.queryByText(/Selected:/)).not.toBeInTheDocument()
+    })
+
+    it('shows the 409 message when delete is refused and keeps the selection', async () => {
+      vi.mocked(deleteSourceFile).mockRejectedValue(new Error('409 a job is using this file'))
+      renderTranscribeView()
+      await selectEp1()
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete source file' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+      expect(await screen.findByText(/a job is using this file/)).toBeInTheDocument()
+      expect(screen.getByText(/Selected:/)).toHaveTextContent('podcast/ep1.mp3')
+    })
   })
 })
