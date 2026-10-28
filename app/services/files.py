@@ -6,8 +6,12 @@ fixtures in tests without ever touching the real audio_sources/ or transcripts/
 directories, which hold personal data.
 """
 
+import os
 import re
+import shutil
+import tempfile
 from pathlib import Path
+from typing import BinaryIO
 
 from transcribe import SUPPORTED_EXTENSIONS
 
@@ -104,6 +108,42 @@ def create_category(audio_root: Path, transcripts_root: Path, name: str) -> None
         raise ValueError(f"invalid category name: {name!r}")
     (audio_root / name).mkdir(parents=True, exist_ok=True)
     (transcripts_root / name).mkdir(parents=True, exist_ok=True)
+
+
+def save_upload(audio_root: Path, category: str, filename: str, stream: BinaryIO) -> str:
+    """Copy an uploaded audio stream into audio_root[/category]/filename.
+
+    Returns the saved file's path relative to audio_root (posix).
+    Raises ValueError for a bad filename (path separators, '.', '..', or an
+    unsupported extension) or an unknown/escaping category, and
+    FileExistsError if a file of that name already exists there (never
+    overwrites). The stream is written to a temp file in the target
+    directory and renamed into place so a partial upload never appears
+    under the final name.
+    """
+    if not filename or Path(filename).name != filename or filename in {".", ".."}:
+        raise ValueError(f"invalid filename: {filename!r}")
+    if Path(filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise ValueError(f"unsupported file type: {filename!r}")
+
+    root = audio_root.resolve()
+    target_dir = (audio_root / category).resolve() if category else root
+    if not target_dir.is_relative_to(root) or not target_dir.is_dir():
+        raise ValueError(f"unknown category: {category!r}")
+
+    target = target_dir / filename
+    if target.exists():
+        raise FileExistsError(f"{filename} already exists in that category")
+
+    tmp = tempfile.NamedTemporaryFile(dir=target_dir, prefix=".upload-", delete=False)
+    try:
+        with tmp:
+            shutil.copyfileobj(stream, tmp)
+        os.replace(tmp.name, target)
+    except BaseException:
+        Path(tmp.name).unlink(missing_ok=True)
+        raise
+    return target.relative_to(root).as_posix()
 
 
 def read_transcript(transcripts_root: Path, rel_path: str) -> str:

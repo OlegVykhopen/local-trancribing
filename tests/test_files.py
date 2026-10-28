@@ -1,3 +1,5 @@
+import io
+
 import pytest
 
 from app.services import files
@@ -161,3 +163,35 @@ def test_transcripts_tree_lists_txt_only(roots):
             ],
         },
     ]
+
+
+def test_save_upload_into_category_and_root(roots):
+    audio_root, _ = roots
+    rel = files.save_upload(audio_root, "therapy", "new.MP3", io.BytesIO(b"abc"))
+    assert rel == "therapy/new.MP3"
+    assert (audio_root / "therapy" / "new.MP3").read_bytes() == b"abc"
+    assert files.save_upload(audio_root, "", "loose.wav", io.BytesIO(b"x")) == "loose.wav"
+    assert not list(audio_root.glob("**/.upload-*"))  # no temp files left behind
+
+
+@pytest.mark.parametrize(
+    "category,filename",
+    [
+        ("therapy", "notes.txt"),  # unsupported extension
+        ("therapy", "../a.m4a"),  # path separator
+        ("therapy", ".."),
+        ("nope", "a.m4a"),  # unknown category
+        ("../etc", "a.m4a"),  # category escape
+    ],
+)
+def test_save_upload_rejects(roots, category, filename):
+    audio_root, _ = roots
+    with pytest.raises(ValueError):
+        files.save_upload(audio_root, category, filename, io.BytesIO(b""))
+
+
+def test_save_upload_duplicate_is_file_exists(roots):
+    audio_root, _ = roots
+    with pytest.raises(FileExistsError):
+        files.save_upload(audio_root, "therapy", "a.m4a", io.BytesIO(b"new"))
+    assert (audio_root / "therapy" / "a.m4a").read_bytes() == b""

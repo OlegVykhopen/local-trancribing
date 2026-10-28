@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -76,6 +76,17 @@ def create_app(
     def get_files() -> FilesResponse:
         tree = files_service.list_tree(audio_root, transcripts_root)
         return FilesResponse(tree=tree)
+
+    @app.post("/api/files/upload", status_code=201)
+    def post_upload(file: UploadFile = File(...), category: str = Form("")) -> dict:
+        filename = file.filename or ""
+        try:
+            rel_path = files_service.save_upload(audio_root, category, filename, file.file)
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"path": rel_path}
 
     @app.get("/api/transcripts", response_model=FilesResponse, response_model_exclude_none=True)
     def get_transcripts() -> FilesResponse:

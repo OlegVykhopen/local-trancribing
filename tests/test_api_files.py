@@ -142,3 +142,34 @@ def test_transcripts_endpoint_shape(client):
 def test_meta_exposes_supported_extensions(client):
     exts = client.get("/api/meta").json()["supported_extensions"]
     assert ".m4a" in exts and ".mp3" in exts and exts == sorted(exts)
+
+
+def test_upload_creates_file_and_returns_path(client, roots):
+    audio_root, _, _ = roots
+    resp = client.post(
+        "/api/files/upload",
+        files={"file": ("ep2.mp3", b"data", "audio/mpeg")},
+        data={"category": "therapy"},
+    )
+    assert resp.status_code == 201
+    assert resp.json() == {"path": "therapy/ep2.mp3"}
+    assert (audio_root / "therapy" / "ep2.mp3").read_bytes() == b"data"
+
+
+def test_upload_duplicate_is_409(client):
+    resp = client.post(
+        "/api/files/upload",
+        files={"file": ("a.m4a", b"", "audio/mp4")},
+        data={"category": "therapy"},
+    )
+    assert resp.status_code == 409
+    assert "already exists" in resp.json()["detail"]
+
+
+def test_upload_bad_extension_is_400(client):
+    resp = client.post(
+        "/api/files/upload",
+        files={"file": ("x.txt", b"", "text/plain")},
+        data={"category": ""},
+    )
+    assert resp.status_code == 400
